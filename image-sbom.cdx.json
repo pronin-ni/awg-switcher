@@ -2,10 +2,10 @@
   "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
   "bomFormat": "CycloneDX",
   "specVersion": "1.7",
-  "serialNumber": "urn:uuid:ef00d16b-3f44-41bb-b4d9-0cc880709c8b",
+  "serialNumber": "urn:uuid:62faf680-0ddc-4430-a728-386c4a4f1b62",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-10-31T20:59:14Z",
+    "timestamp": "2026-10-31T21:11:02Z",
     "tools": {
       "components": [
         {
@@ -17,7 +17,7 @@
       ]
     },
     "component": {
-      "bom-ref": "1a0c577c700583a0",
+      "bom-ref": "aa3c6a2511c47135",
       "type": "container",
       "name": "awg-switcher",
       "version": "e2e"
@@ -49,7 +49,7 @@
         },
         {
           "name": "syft:location:0:layerID",
-          "value": "sha256:bd249547a176c623cec8707dbfd70d4bb6d82776a6d586c79259bc083f3994e3"
+          "value": "sha256:e27c5e2c8e3ac6f6688bf194071d23f1e52f8aad06106cf663294c8fbaf41f99"
         },
         {
           "name": "syft:location:0:path",
@@ -919,7 +919,7 @@
         },
         {
           "name": "syft:location:0:layerID",
-          "value": "sha256:bd249547a176c623cec8707dbfd70d4bb6d82776a6d586c79259bc083f3994e3"
+          "value": "sha256:e27c5e2c8e3ac6f6688bf194071d23f1e52f8aad06106cf663294c8fbaf41f99"
         },
         {
           "name": "syft:location:0:path",
@@ -1105,7 +1105,7 @@
         },
         {
           "name": "syft:location:0:layerID",
-          "value": "sha256:bd249547a176c623cec8707dbfd70d4bb6d82776a6d586c79259bc083f3994e3"
+          "value": "sha256:e27c5e2c8e3ac6f6688bf194071d23f1e52f8aad06106cf663294c8fbaf41f99"
         },
         {
           "name": "syft:location:0:path",
@@ -1241,17 +1241,17 @@
       ]
     },
     {
-      "bom-ref": "42c156b8785d2790",
+      "bom-ref": "c716c68183c9bcac",
       "type": "file",
       "name": "/usr/local/bin/awg-switcher",
       "hashes": [
         {
           "alg": "SHA-1",
-          "content": "3556f23e598d093c5033dd3426c9863a9ea910b0"
+          "content": "15118e112a7966e5e92d8596ba3635928d863da3"
         },
         {
           "alg": "SHA-256",
-          "content": "31d7eb0ef49f4ad88d2a21041008869d8664ce314e5d68db4d46cb704cef4c19"
+          "content": "347cb083c047e460b99e27c66d691fef37e71b12c9b6aa76e74f6ff06c09c8a4"
         }
       ],
       "licenses": [
