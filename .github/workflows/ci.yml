@@ -67,7 +67,7 @@ jobs:
       - name: Build container
         run: docker build --platform linux/amd64 -t awg-switcher:ci .
       - name: Container license inventory
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: awg-switcher:ci
           scanners: license
