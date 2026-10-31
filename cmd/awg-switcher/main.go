@@ -582,7 +582,6 @@ func (c *Controller) recordHealth(p *Profile, result healthResult) {
 			p.Healthy = true
 			p.State = "HEALTHY"
 			p.LastError = ""
-			p.restartTimes = nil
 		} else {
 			p.State = "CONNECTING"
 		}

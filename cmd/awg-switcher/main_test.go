@@ -100,6 +100,19 @@ func TestRetryDelayExponentialAndRateLimited(t *testing.T) {
 	}
 }
 
+func TestHealthyProbeDoesNotResetRestartRateLimit(t *testing.T) {
+	s := Settings{}
+	s.Failover.FailureThreshold = 2
+	s.Failover.RecoveryThreshold = 2
+	history := []time.Time{time.Now().Add(-4 * time.Minute), time.Now().Add(-3 * time.Minute), time.Now().Add(-2 * time.Minute), time.Now().Add(-time.Minute), time.Now()}
+	p := &Profile{Name: "primary", State: "CONNECTING", restartTimes: history}
+	c := &Controller{settings: s}
+	c.recordHealth(p, healthResult{Healthy: true, TransportOK: true})
+	if len(p.restartTimes) != len(history) {
+		t.Fatalf("successful health probe reset restart history: got %d entries, want %d", len(p.restartTimes), len(history))
+	}
+}
+
 func TestProcessEngineStopsAndRemovesPrivateRuntimeConfig(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "fake-engine")
