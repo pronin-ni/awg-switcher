@@ -1,0 +1,16 @@
+github.com/MakeNowJust/heredoc/v2,https://github.com/MakeNowJust/heredoc/blob/v2.0.1/LICENSE,MIT
+github.com/akamensky/argparse,https://github.com/akamensky/argparse/blob/v1.4.0/LICENSE,MIT
+github.com/amnezia-vpn/amneziawg-go/v3,https://github.com/amnezia-vpn/amneziawg-go/blob/v3.1.20260828/LICENSE,MIT
+github.com/bropines/awg-wireproxy,https://github.com/bropines/awg-wireproxy/blob/HEAD/LICENSE,ISC
+github.com/go-ini/ini,https://github.com/go-ini/ini/blob/v1.67.0/LICENSE,Apache-2.0
+github.com/google/btree,https://github.com/google/btree/blob/v1.1.3/LICENSE,Apache-2.0
+github.com/landlock-lsm/go-landlock/landlock,https://github.com/landlock-lsm/go-landlock/blob/v0.10.1/LICENSE,MIT
+github.com/things-go/go-socks5,https://github.com/things-go/go-socks5/blob/v0.1.3/LICENSE,MIT
+golang.org/x/crypto,https://cs.opensource.google/go/x/crypto/+/v0.57.0:LICENSE,BSD-3-Clause
+golang.org/x/exp/constraints,https://cs.opensource.google/go/x/exp/+/6ae5c781:LICENSE,BSD-3-Clause
+golang.org/x/net,https://cs.opensource.google/go/x/net/+/v0.59.0:LICENSE,BSD-3-Clause
+golang.org/x/sys,https://cs.opensource.google/go/x/sys/+/v0.48.0:LICENSE,BSD-3-Clause
+golang.org/x/time/rate,https://cs.opensource.google/go/x/time/+/v0.15.0:LICENSE,BSD-3-Clause
+gvisor.dev/gvisor/pkg,https://github.com/google/gvisor/blob/bd481cb16efb/LICENSE,Apache-2.0
+kernel.org/pub/linux/libs/security/libcap/psx,,GPL-2.0
+suah.dev/protect,https://codeberg.org/qbit/protect/tree/master/LICENSE,ISC

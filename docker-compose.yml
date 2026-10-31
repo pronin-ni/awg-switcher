@@ -1,0 +1,27 @@
+services:
+  awg-switcher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: awg-switcher:2.1.0
+    container_name: awg-switcher
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /run/awg-switcher:rw,noexec,nosuid,size=16m,uid=10001,gid=10001
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./settings.yaml:/app/settings.yaml:ro
+      - ./data:/app/data
+    networks:
+      - proxy-network
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 1.5
+
+networks:
+  proxy-network:
+    external: true

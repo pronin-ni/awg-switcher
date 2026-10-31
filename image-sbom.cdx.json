@@ -1,0 +1,1320 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "serialNumber": "urn:uuid:ef00d16b-3f44-41bb-b4d9-0cc880709c8b",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-10-31T20:59:14Z",
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "author": "anchore",
+          "name": "syft",
+          "version": "1.55.0"
+        }
+      ]
+    },
+    "component": {
+      "bom-ref": "1a0c577c700583a0",
+      "type": "container",
+      "name": "awg-switcher",
+      "version": "e2e"
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "pkg:golang/awg-switcher?package-id=f2e2f34664d7c28e",
+      "type": "library",
+      "name": "awg-switcher",
+      "version": "UNKNOWN",
+      "purl": "pkg:golang/awg-switcher",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:bd249547a176c623cec8707dbfd70d4bb6d82776a6d586c79259bc083f3994e3"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/awg-switcher"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "awg-switcher"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/github.com/makenowjust/heredoc/v2@v2.0.1?package-id=c62cd3a4c093fe6d",
+      "type": "library",
+      "name": "github.com/MakeNowJust/heredoc/v2",
+      "version": "v2.0.1",
+      "cpe": "cpe:2.3:a:MakeNowJust:heredoc\\/v2:v2.0.1:*:*:*:*:*:*:*",
+      "purl": "pkg:golang/github.com/MakeNowJust/heredoc/v2@v2.0.1",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:rlCHh70XXXv7toz95ajQWOWQnN4WNLt0TdpZYIR/J6A="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/bropines/awg-wireproxy"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/github.com/akamensky/argparse@v1.4.0?package-id=7b3c0b91c0da6814",
+      "type": "library",
+      "name": "github.com/akamensky/argparse",
+      "version": "v1.4.0",
+      "cpe": "cpe:2.3:a:akamensky:argparse:v1.4.0:*:*:*:*:*:*:*",
+      "purl": "pkg:golang/github.com/akamensky/argparse@v1.4.0",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:YGzvsTqCvbEZhL8zZu2AiA5nq805NZh75JNj4ajn1xc="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/bropines/awg-wireproxy"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/github.com/amnezia-vpn/amneziawg-go/v3@v3.1.20260828?package-id=27020524ad73bfad",
+      "type": "library",
+      "name": "github.com/amnezia-vpn/amneziawg-go/v3",
+      "version": "v3.1.20260828",
+      "cpe": "cpe:2.3:a:amnezia-vpn:amneziawg-go\\/v3:v3.1.20260828:*:*:*:*:*:*:*",
+      "purl": "pkg:golang/github.com/amnezia-vpn/amneziawg-go/v3@v3.1.20260828",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:amnezia-vpn:amneziawg_go\\/v3:v3.1.20260828:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:amnezia_vpn:amneziawg-go\\/v3:v3.1.20260828:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:amnezia_vpn:amneziawg_go\\/v3:v3.1.20260828:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:amnezia:amneziawg-go\\/v3:v3.1.20260828:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:amnezia:amneziawg_go\\/v3:v3.1.20260828:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:D8d8gGvwXcTxUIsE4z6F6vjy4/VZddu95vMNtOygh1c="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/bropines/awg-wireproxy"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/github.com/bropines/awg-wireproxy@v1.2.6-0.20261009150836-02588433b632?package-id=38c9d477aa6cb697",
+      "type": "library",
+      "name": "github.com/bropines/awg-wireproxy",
+      "version": "v1.2.6-0.20261009150836-02588433b632",
+      "cpe": "cpe:2.3:a:bropines:awg-wireproxy:v1.2.6-0.20261009150836-02588433b632:*:*:*:*:*:*:*",
+      "purl": "pkg:golang/github.com/bropines/awg-wireproxy@v1.2.6-0.20261009150836-02588433b632",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:bropines:awg_wireproxy:v1.2.6-0.20261009150836-02588433b632:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/bropines/awg-wireproxy"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "ISC"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/github.com/go-ini/ini@v1.67.0?package-id=19f202796d646d57",
+      "type": "library",
+      "name": "github.com/go-ini/ini",
+      "version": "v1.67.0",
+      "cpe": "cpe:2.3:a:go-ini:ini:v1.67.0:*:*:*:*:*:*:*",
+      "purl": "pkg:golang/github.com/go-ini/ini@v1.67.0",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:go_ini:ini:v1.67.0:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:go:ini:v1.67.0:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:z6ZrTEZqSWOTyH2FlglNbNgARyHG8oLW9gMELqKr06A="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/bropines/awg-wireproxy"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/github.com/google/btree@v1.1.3?package-id=1901e424bcd4c2a2",
+      "type": "library",
+      "name": "github.com/google/btree",
+      "version": "v1.1.3",
+      "cpe": "cpe:2.3:a:google:btree:v1.1.3:*:*:*:*:*:*:*",
+      "purl": "pkg:golang/github.com/google/btree@v1.1.3",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:CVpQJjYgC4VbzxeGVHfvZrv1ctoYCAI8vbl07Fcxlyg="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/bropines/awg-wireproxy"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/github.com/landlock-lsm/go-landlock@v0.10.1?package-id=37f482fbab6c631d",
+      "type": "library",
+      "name": "github.com/landlock-lsm/go-landlock",
+      "version": "v0.10.1",
+      "cpe": "cpe:2.3:a:landlock-lsm:go-landlock:v0.10.1:*:*:*:*:*:*:*",
+      "purl": "pkg:golang/github.com/landlock-lsm/go-landlock@v0.10.1",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:landlock-lsm:go_landlock:v0.10.1:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:landlock_lsm:go-landlock:v0.10.1:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:landlock_lsm:go_landlock:v0.10.1:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:landlock:go-landlock:v0.10.1:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:landlock:go_landlock:v0.10.1:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:MkvuYeTgGRpOnROAO9V2gV3C5lctFr6O0b9wnPWcQWk="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/bropines/awg-wireproxy"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/github.com/things-go/go-socks5@v0.1.3?package-id=4fa19106b66e145e",
+      "type": "library",
+      "name": "github.com/things-go/go-socks5",
+      "version": "v0.1.3",
+      "cpe": "cpe:2.3:a:things-go:go-socks5:v0.1.3:*:*:*:*:*:*:*",
+      "purl": "pkg:golang/github.com/things-go/go-socks5@v0.1.3",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:things-go:go_socks5:v0.1.3:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:things_go:go-socks5:v0.1.3:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:things_go:go_socks5:v0.1.3:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:things:go-socks5:v0.1.3:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:things:go_socks5:v0.1.3:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:W6lC9bUiuubcVVGU5BRRrwUP6k/7HEwrJm5O+mIUHDE="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/bropines/awg-wireproxy"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/golang.org/x/crypto@v0.57.0?package-id=11f90a62f9b2ef84",
+      "type": "library",
+      "name": "golang.org/x/crypto",
+      "version": "v0.57.0",
+      "cpe": "cpe:2.3:a:golang:crypto:v0.57.0:*:*:*:*:go:*:*",
+      "purl": "pkg:golang/golang.org/x/crypto@v0.57.0",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:go:ssh:v0.57.0:*:*:*:*:go:*:*"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:3ZVCjf8Ggz7zneR/EHRVx68Ctf+2pmIMP2UFhh9cC6M="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/bropines/awg-wireproxy"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/golang.org/x/exp@v0.0.0-20250711185948-6ae5c78190dc?package-id=22a591a48b53cb7e",
+      "type": "library",
+      "name": "golang.org/x/exp",
+      "version": "v0.0.0-20250711185948-6ae5c78190dc",
+      "cpe": "cpe:2.3:a:golang:x\\/exp:v0.0.0-20250711185948-6ae5c78190dc:*:*:*:*:*:*:*",
+      "purl": "pkg:golang/golang.org/x/exp@v0.0.0-20250711185948-6ae5c78190dc",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:TS73t7x3KarrNd5qAipmspBDS1rkMcgVG/fS1aRb4Rc="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/bropines/awg-wireproxy"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/golang.org/x/net@v0.59.0?package-id=4f3875a0cf19bee0",
+      "type": "library",
+      "name": "golang.org/x/net",
+      "version": "v0.59.0",
+      "cpe": "cpe:2.3:a:golang:networking:v0.59.0:*:*:*:*:go:*:*",
+      "purl": "pkg:golang/golang.org/x/net@v0.59.0",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:golang:net:v0.59.0:*:*:*:*:go:*:*"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:5zfYln+w5XCxwrnMMJPufRgNoXEaGxl0wo5GqPXyues="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/bropines/awg-wireproxy"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/golang.org/x/sys@v0.48.0?package-id=be01f94177d839ff",
+      "type": "library",
+      "name": "golang.org/x/sys",
+      "version": "v0.48.0",
+      "cpe": "cpe:2.3:a:golang:x\\/sys:v0.48.0:*:*:*:*:*:*:*",
+      "purl": "pkg:golang/golang.org/x/sys@v0.48.0",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/bropines/awg-wireproxy"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/golang.org/x/time@v0.15.0?package-id=87fad38f3d538f1a",
+      "type": "library",
+      "name": "golang.org/x/time",
+      "version": "v0.15.0",
+      "cpe": "cpe:2.3:a:golang:x\\/time:v0.15.0:*:*:*:*:*:*:*",
+      "purl": "pkg:golang/golang.org/x/time@v0.15.0",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:bbrp8t3bGUeFOx08pvsMYRTCVSMk89u4tKbNOZbp88U="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/bropines/awg-wireproxy"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/gopkg.in/yaml.v3@v3.0.1?package-id=c7ab019d9eb82c06",
+      "type": "library",
+      "name": "gopkg.in/yaml.v3",
+      "version": "v3.0.1",
+      "cpe": "cpe:2.3:a:yaml_project:yaml:v3.0.1:*:*:*:*:go:*:*",
+      "purl": "pkg:golang/gopkg.in/yaml.v3@v3.0.1",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:bd249547a176c623cec8707dbfd70d4bb6d82776a6d586c79259bc083f3994e3"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/awg-switcher"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "awg-switcher"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        },
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/gvisor.dev/gvisor@v0.0.0-20261009044828-bd481cb16efb?package-id=f54ef3b9674a629e",
+      "type": "library",
+      "name": "gvisor.dev/gvisor",
+      "version": "v0.0.0-20261009044828-bd481cb16efb",
+      "purl": "pkg:golang/gvisor.dev/gvisor@v0.0.0-20261009044828-bd481cb16efb",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:FCtYhoVt78v8F7zzA68Aj0ZeyJuRd5goKlIV+99UsUw="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/bropines/awg-wireproxy"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/kernel.org/pub/linux/libs/security/libcap/psx@v1.2.77?package-id=87c0bc03c5682da6",
+      "type": "library",
+      "name": "kernel.org/pub/linux/libs/security/libcap/psx",
+      "version": "v1.2.77",
+      "cpe": "cpe:2.3:a:pub:linux\\/libs\\/security\\/libcap\\/psx:v1.2.77:*:*:*:*:*:*:*",
+      "purl": "pkg:golang/kernel.org/pub/linux/libs/security/libcap/psx@v1.2.77",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:Z06sMOzc0GNCwp6efaVrIrz4ywGJ1v+DP0pjVkOfDuA="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/bropines/awg-wireproxy"
+        },
+        {
+          "name": "awg-switcher:license-selection",
+          "value": "BSD-3-Clause selected from BSD-3-Clause OR GPL-2.0-only"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/stdlib@1.27.1?package-id=17e04e7a11c94b36",
+      "type": "library",
+      "name": "stdlib",
+      "version": "go1.27.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "cpe": "cpe:2.3:a:golang:go:1.27.1:-:*:*:*:*:*:*",
+      "purl": "pkg:golang/stdlib@1.27.1",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:bd249547a176c623cec8707dbfd70d4bb6d82776a6d586c79259bc083f3994e3"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/awg-switcher"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/stdlib@1.27.1?package-id=db414855b94c5e2d",
+      "type": "library",
+      "name": "stdlib",
+      "version": "go1.27.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "cpe": "cpe:2.3:a:golang:go:1.27.1:-:*:*:*:*:*:*",
+      "purl": "pkg:golang/stdlib@1.27.1",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/suah.dev/protect@v1.2.4?package-id=1003d8423e56ffe8",
+      "type": "library",
+      "name": "suah.dev/protect",
+      "version": "v1.2.4",
+      "purl": "pkg:golang/suah.dev/protect@v1.2.4",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:88517d7c53025a6a4546d0cbd81b13697d8e67655e7fbe2dd84ad94f6082c17b"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/wireproxy"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.1"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:iVZG/zQB63FKNpITDYM/cXoAeCTIjCiXHuFVByJFDzg="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/bropines/awg-wireproxy"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "ISC"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "c351755a368827e4",
+      "type": "file",
+      "name": "/usr/local/bin/wireproxy",
+      "hashes": [
+        {
+          "alg": "SHA-1",
+          "content": "f54d1e9f3b864b101f6ca6d13f32477ecfed80a0"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "619f3e7b4aa6e9f6af38a826f30578d0e2eca9f932e93f518220884e9b7e10a6"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "ISC"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "42c156b8785d2790",
+      "type": "file",
+      "name": "/usr/local/bin/awg-switcher",
+      "hashes": [
+        {
+          "alg": "SHA-1",
+          "content": "3556f23e598d093c5033dd3426c9863a9ea910b0"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "31d7eb0ef49f4ad88d2a21041008869d8664ce314e5d68db4d46cb704cef4c19"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "ca-certificates-bundle",
+      "version": "20261020-r0",
+      "purl": "pkg:apk/alpine/ca-certificates-bundle@20261020-r0?arch=x86_64&distro=alpine-3.22.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MPL-2.0"
+          }
+        },
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "awg-switcher:source",
+          "value": "alpine v3.22 APKINDEX/APKBUILD"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "pkg:golang/awg-switcher?package-id=f2e2f34664d7c28e",
+      "dependsOn": [
+        "pkg:golang/gopkg.in/yaml.v3@v3.0.1?package-id=c7ab019d9eb82c06",
+        "pkg:golang/stdlib@1.27.1?package-id=17e04e7a11c94b36"
+      ]
+    },
+    {
+      "ref": "pkg:golang/github.com/bropines/awg-wireproxy@v1.2.6-0.20261009150836-02588433b632?package-id=38c9d477aa6cb697",
+      "dependsOn": [
+        "pkg:golang/github.com/akamensky/argparse@v1.4.0?package-id=7b3c0b91c0da6814",
+        "pkg:golang/github.com/amnezia-vpn/amneziawg-go/v3@v3.1.20260828?package-id=27020524ad73bfad",
+        "pkg:golang/github.com/go-ini/ini@v1.67.0?package-id=19f202796d646d57",
+        "pkg:golang/github.com/google/btree@v1.1.3?package-id=1901e424bcd4c2a2",
+        "pkg:golang/github.com/landlock-lsm/go-landlock@v0.10.1?package-id=37f482fbab6c631d",
+        "pkg:golang/github.com/makenowjust/heredoc/v2@v2.0.1?package-id=c62cd3a4c093fe6d",
+        "pkg:golang/github.com/things-go/go-socks5@v0.1.3?package-id=4fa19106b66e145e",
+        "pkg:golang/golang.org/x/crypto@v0.57.0?package-id=11f90a62f9b2ef84",
+        "pkg:golang/golang.org/x/exp@v0.0.0-20250711185948-6ae5c78190dc?package-id=22a591a48b53cb7e",
+        "pkg:golang/golang.org/x/net@v0.59.0?package-id=4f3875a0cf19bee0",
+        "pkg:golang/golang.org/x/sys@v0.48.0?package-id=be01f94177d839ff",
+        "pkg:golang/golang.org/x/time@v0.15.0?package-id=87fad38f3d538f1a",
+        "pkg:golang/gvisor.dev/gvisor@v0.0.0-20261009044828-bd481cb16efb?package-id=f54ef3b9674a629e",
+        "pkg:golang/kernel.org/pub/linux/libs/security/libcap/psx@v1.2.77?package-id=87c0bc03c5682da6",
+        "pkg:golang/stdlib@1.27.1?package-id=db414855b94c5e2d",
+        "pkg:golang/suah.dev/protect@v1.2.4?package-id=1003d8423e56ffe8"
+      ]
+    }
+  ]
+}

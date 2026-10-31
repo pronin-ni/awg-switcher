@@ -1,0 +1,22 @@
+proxy:
+  http_port: 20171
+profiles:
+  directory: /app/configs
+  primary: primary.conf
+  priority:
+    - primary.conf
+    - backup1.conf
+    - backup2.conf
+failover:
+  enabled: true
+  check_interval: 15s
+  check_timeout: 8s
+  failure_threshold: 2
+  recovery_threshold: 3
+  recovery_interval: 60s
+  switch_cooldown: 30s
+health:
+  urls:
+    - https://www.cloudflare.com/cdn-cgi/trace
+    - https://api.ipify.org
+  required_successes: 1
