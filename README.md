@@ -36,6 +36,7 @@ Example preparation (run as an administrator on the NAS):
 mkdir -p /Volume2/docker/awg-switcher/{configs,data}
 cp settings.example.yaml /Volume2/docker/awg-switcher/settings.yaml
 chown -R 10001:10001 /Volume2/docker/awg-switcher/{configs,data}
+chown 10001:10001 /Volume2/docker/awg-switcher/settings.yaml
 chmod 0700 /Volume2/docker/awg-switcher/{configs,data}
 chmod 0400 /Volume2/docker/awg-switcher/settings.yaml
 docker network inspect proxy-network >/dev/null 2>&1 || docker network create proxy-network
