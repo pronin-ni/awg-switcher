@@ -1,37 +1,41 @@
 # Validation report
 
-This report contains no VPN keys, raw public addresses, SSH credentials, or full live logs. Validation was performed on 2026-11-01 against the dedicated Ubuntu 24.04 x86_64 test VPS. No NAS or pre-existing service/container was involved.
+Validation date: 2026-11-01. This report omits credentials, VPN keys, raw public IPs, and full logs. The VPS validation used a separate feature-test container/network with admin and proxy ports bound to loopback only. The existing baseline project and NAS services were not changed.
 
-## Local checks
+## Feature candidate local checks
 
-- `go test ./... -count=1` — PASS, including HTTP methods/body forwarding, large streaming, HTTPS CONNECT through the application mux, SOCKS hostname routing, fail-closed, and fake-engine failover/recovery tests.
+- `go test ./... -count=1` — PASS (auth/CSRF, empty profile directory, config validation, traversal/symlink/size checks, secret masking, profile state/event persistence, runtime CRUD, concurrency and proxy fail-closed coverage).
 - `go test -race ./... -count=1` — PASS.
 - `go vet ./...` — PASS.
-- `govulncheck@v1.2.0 ./...` — PASS, no known Go vulnerabilities reported.
-- `docker-compose -f docker-compose.yml config -q` — PASS.
-- Profile parser — both locally supplied profiles passed `normalizeWG`; filenames and profile contents were not printed.
-- Secret checks — Gitleaks v8.30.1 scanned the current six-commit Git history: zero findings. A sanitized source tree excluding ignored `creds/` also had zero findings. The three generic-key matches when scanning the entire local worktree were all confined to ignored files under `creds/`; none are tracked or included in the image/build context.
+- `govulncheck@v1.2.0 ./...` — no reachable vulnerability in called code; it reports one required module advisory in `golang.org/x/crypto` as not reachable.
+- Bun browser bundling — PASS; plain embedded JS/CSS/HTML with no frontend packages.
+- Docker Compose base and LAN override validation — PASS.
+- `go-licenses v1.6.0 check` — PASS for MIT/ISC/Apache-2.0/BSD-3-Clause source dependencies. The Linux/amd64 candidate image SBOM has 26 components with reviewed license mappings.
+- Gitleaks full Git history — PASS, zero findings. `creds/` remains ignored and excluded from Docker build context.
 
-## Dedicated VPS
+## Docker E2E
 
-- Ubuntu 24.04, x86_64/amd64, `/dev/net/tun` present. The chosen userspace engine does not need the host TUN device.
-- Docker Engine 29.1.3 and Compose 2.40.3 installed on the dedicated VPS; initial Docker container count was zero.
-- Local Linux/amd64 Docker build from the secret-free build context — PASS, using wireproxy v2.1.0 source commit `02588433b6328171b594d76f3f16bd3404258a83`, Go 1.27.3, and security-updated x/net v0.62.0 / x/crypto v0.58.0. `govulncheck` reports no reachable vulnerabilities in wireproxy. Trivy reports no x/net advisories; its one remaining finding is the legacy OpenPGP advisory at x/crypto module level. Trivy's license scanner reports Go license data as “not scanned”; the explicit `go-licenses` checks pass for both source graphs.
-- Final image SBOM — generated from the final built image with Syft v1.55.0, then supplemented with the audited license mapping and packaged Alpine CA-bundle license. `image-sbom.cdx.json` contains 23 components. Trivy v0.76.1 did not attach license identifiers to the Go binaries; the explicit `go-licenses` source audits pass, but legal/provenance review remains open.
-- Saved-image layer check — 31 files scanned; zero `.conf`/key/settings files and zero exact private-key matches against the two supplied profiles.
-- Isolated Compose project `awg-switcher-e2e` — config validation and startup PASS; final candidate container reached healthy state; two separate supplied real profiles reached `HEALTHY` concurrently.
-- `api.ipify.org` HTTPS through the primary — HTTP 200. Pausing the primary engine caused the controller to fail over; a new HTTPS request through the proxy succeeded through the backup. Both supplied exits returned the **same** public egress-IP fingerprint, so a live IP change cannot be proven with these profiles.
-- Primary engine recovery — PASS: supervisor restarted the interrupted process, it passed recovery probes, selection returned to primary, and HTTPS continued through the proxy.
-- Pausing both live engines produced `UNHEALTHY` state for both profiles; an actual HTTP CONNECT request returned `503 Service Unavailable`. The controller restarted the engines and the test project recovered to healthy state. Fake-engine tests also assert zero DIRECT-target hits.
-- `https://api.radarr.video/v1/search?q=xt` and `https://radarr.servarr.com/v1/ping` did not complete CONNECT from these live profiles (proxy CONNECT 503). The failures were not interpreted as VPN health failures after other HTTPS routes succeeded. Cloudflare trace was also unavailable from this test route. These resource-compatibility checks remain open.
-- First container start exposed a test-only bind-mount permissions mistake (`settings.yaml` was owner-readable only by root). After setting the mounted settings/configs readable by UID 10001 within the VPS's root-protected project directory, startup and health checks passed. NAS installation instructions now include ownership/mode requirements.
+- Linux/amd64 image built locally as development candidate `awg-switcher:webui-dev` (image ID `sha256:8e87f7f89d2136eaf78d49db9a92a500f9a45e8792137c146a0de2880e96bb8b`; saved archive SHA-256 `0de4405654a82947db5a93d37cb273997caa5029c15eefcff0e85f5e32e872a6`). No GHCR image was published.
+- Read-only container, empty config directory — UI remained available, unauthenticated admin returned 401, CSRF mutation returned 403, proxy readiness returned 503, and proxy CONNECT failed closed with 503.
+- Local synthetic-profile E2E — upload, opaque profile ID, safe config masking/no secret in profile JSON, rename/priority, atomic replacement, delete, and metadata restoration after container restart — PASS.
+- Candidate image layer scan — 33 files; zero config/key/settings paths and zero matches for locally supplied PrivateKeys. Trivy license scanner found zero license findings.
+- Trivy vulnerability scan — `GO-2026-5932` in `golang.org/x/crypto v0.58.0` appears against each of the two Go binaries (two duplicate image findings); no fix version was listed. `govulncheck` says the advisory is not reachable from imported/called code. This remains a security-review gate, not silently suppressed.
+- GitHub Actions run `41287868835` at current tested head `afa7174` — PASS for `tests-and-license` and `dependency-review`; `publish-ghcr` was skipped by the explicit release gates. The dependency-review job initially exposed non-SPDX `UNKNOWN`/`NOASSERTION` entries and a disabled repository dependency graph. The policy now uses SPDX identifiers, and GitHub dependency alerts/graph were enabled rather than removing the check. A Gitleaks Action run on an intermediate head raced with a subsequent PR update and tried scanning a not-yet-fetched head; CI now runs pinned Gitleaks CLI directly against the checked-out history. Node 24 versions are used for checkout, Go setup, dependency review, and artifact upload.
 
-## Release gates still open
+## Dedicated VPS live validation
 
-- The generated container SBOM/license supplement is available, but image license scanner output did not independently resolve Go package license IDs. The notice files were verified by the saved-image file/layer scan only for inclusion, not legal sufficiency.
-- The upstream release tag is unsigned; the source commit is pinned and checked during the source build, but tag authenticity remains a provenance risk.
-- The two supplied profiles share an egress-IP fingerprint, so the requested live primary-IP-to-backup-IP change is not proven. Radarr/Sonarr-related endpoints also remain unverified from these exits.
-- GitHub Actions has not yet run for these changes; full-history secret scanning is configured and the current local history/source scans are clean.
-- Production NAS deployment and GHCR publication were not performed. The license review remains **LICENSE REVIEW REQUIRED**.
+- Feature candidate ran as a separate container and Docker network on the dedicated Ubuntu 24.04 amd64 VPS. Admin and proxy host mappings were `127.0.0.1` only. Existing `awg-switcher-e2e` baseline container was left running and unchanged.
+- Both supplied real profiles started independent engines and reached `HEALTHY`; direct SOCKS5 probes to `api.ipify.org` returned HTTPS 200 with verified TLS for each wireproxy listener.
+- Web UI upload of a real `.conf` from the local ignored `creds/` directory returned 201 with a generated opaque ID. Explicit profile checks became successful; HTTPS diagnostics via that imported engine returned HTTP 200/TLS verified. The imported test profile was deleted afterward.
+- HTTPS diagnostics for `https://api.radarr.video/v1/search?q=xt` timed out for both exits after SOCKS negotiation. `https://radarr.servarr.com/v1/ping` timed out on one exit; the other failed during SOCKS connect with a generic connection error (no SOCKS reply code was available to classify further). Direct per-engine SOCKS probes also failed to complete those Radarr requests. By contrast, ipify succeeded over both tunnels. Direct checks outside the VPN completed TLS: from the workstation, `api.radarr.video/` returned 404 and `radarr.servarr.com/` 200; from the VPS host network, both tested Radarr paths returned HTTP 200. Thus the failure is specific to the VPN tunnel/exit path or filtering of those exits, not general VPS or destination availability. The tunnel attempts did not obtain an HTTP response or complete TLS. No HTTP 403 was observed, so this is not an application-level authorization result.
+- Failover evidence did not depend on changing public IP: the active wireproxy child was paused in the isolated container; the controller marked it unhealthy, selected the other profile ID, and two new HTTPS requests through the HTTP proxy succeeded during the transition. The supervisor restarted/recovered the paused profile, selected it again after recovery checks, and ten HTTPS proxy requests succeeded during recovery.
+- After replacing the candidate container while preserving its protected data directory, both real profiles recovered and the persisted event feed was restored. Local Docker E2E separately verified UI metadata survives container restart.
 
-**Overall: BLOCKED for production release.** The implementation is ready for continued isolated live validation; the findings above prevent a production-ready claim.
+## Remaining release gates
+
+- Radarr endpoint compatibility is unresolved for these VPN exits. Direct VPS-host HTTPS returns HTTP 200 for the tested paths, while the same paths fail over each configured VPN exit; ipify works through those exits. This localizes the issue to VPN/tunnel egress or exit-IP filtering, but cannot distinguish peer configuration from provider-side policy. A different exit/peer or provider clarification is needed; no direct-network fallback was added because it would violate fail-closed routing. Sonarr was not separately validated.
+- Both real profiles have the same previously observed egress-IP fingerprint; the live failover proof therefore uses selected profile IDs, stopped/restarted engine process, and successful new proxy requests instead of IP change.
+- The upstream wireproxy release tag is unsigned (source commit is pinned and checked); this is a provenance concern, not by itself a license incompatibility. Individual CA certificate terms and legal sufficiency still require human review.
+- PR #1 remains open for review. CI passed at `afa7174`. No production NAS deployment or GHCR publication was performed.
+
+**Overall: development candidate validated locally, by CI at `afa7174`, and on the isolated VPS; production release remains blocked by PR review, Radarr compatibility through the tested exits, provenance, and human license review.**

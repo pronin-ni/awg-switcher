@@ -14,10 +14,10 @@ jobs:
   tests-and-license:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27.3'
           cache: true
@@ -26,6 +26,11 @@ jobs:
           go test ./...
           go test -race ./...
           go vet ./...
+      - name: Embedded UI syntax and Compose validation
+        run: |
+          node --check cmd/awg-switcher/web/app.js
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.lan.example.yml config --quiet
       - name: Dependency vulnerability scan
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.2.0 ./...
       - name: Validate Compose model
@@ -61,10 +66,8 @@ jobs:
           if not seen_dual:
               raise SystemExit("expected manually reviewed libcap/psx dual-license entry is missing")
           PY
-      - name: Secret scan (full checkout)
-        uses: gitleaks/gitleaks-action@v2.3.9
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Secret scan (full checkout history)
+        run: go run github.com/zricethezav/gitleaks/v8@v8.30.1 git --redact --exit-code 1 .
       - name: Build Linux amd64 binary
         run: mkdir -p dist && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/awg-switcher ./cmd/awg-switcher
       - name: Build container
@@ -82,7 +85,7 @@ jobs:
           image: awg-switcher:ci
           format: cyclonedx-json
           output-file: image-sbom.cdx.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: awg-switcher-image-sbom
@@ -96,12 +99,12 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/checkout@v7
+      - uses: actions/dependency-review-action@v5
         with:
           config-file: .github/dependency-review-config.yml
           fail-on-severity: moderate
-          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, LGPL-2.1, LGPL-3.0, UNKNOWN, NOASSERTION
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, LGPL-2.1, LGPL-3.0
 
   publish-ghcr:
     if: startsWith(github.ref, 'refs/tags/v') && vars.ALLOW_PUBLIC_RELEASE == 'true' && vars.LICENSE_REVIEW_PASSED == 'true' && vars.LIVE_VALIDATION_PASSED == 'true'

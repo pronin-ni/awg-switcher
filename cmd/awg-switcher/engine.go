@@ -58,7 +58,7 @@ func (e ProcessEngine) Start(ctx context.Context, config []byte, socks string, s
 	if err := os.MkdirAll(e.RuntimeDir, 0700); err != nil {
 		return nil, errors.New("runtime directory unavailable")
 	}
-	path := filepath.Join(e.RuntimeDir, fmt.Sprintf("profile-%d.conf", slot))
+	path := filepath.Join(e.RuntimeDir, fmt.Sprintf("profile-%08x.conf", uint32(slot)))
 	data := strings.TrimSpace(string(config)) + fmt.Sprintf("\n\n[Socks5]\nBindAddress = %s\n", socks)
 	tmp, err := os.CreateTemp(e.RuntimeDir, fmt.Sprintf("profile-%d-*.tmp", slot))
 	if err != nil {
@@ -153,8 +153,10 @@ func (c *Controller) supervise(ctx context.Context, p *Profile, slot int) {
 		}
 		p.mu.Lock()
 		p.State = "STARTING"
+		config := append([]byte(nil), p.config...)
+		socks := p.socks
 		p.mu.Unlock()
-		session, err := c.engine.Start(ctx, p.config, p.socks, slot)
+		session, err := c.engine.Start(ctx, config, socks, slot)
 		if err != nil {
 			p.mu.Lock()
 			p.Restarts++
@@ -163,6 +165,7 @@ func (c *Controller) supervise(ctx context.Context, p *Profile, slot int) {
 			delay, history := retryDelay(time.Now(), p.restartTimes)
 			p.restartTimes = history
 			p.mu.Unlock()
+			c.appendEvent(ControllerEvent{At: time.Now().UTC(), Kind: "engine_start_error", Profile: p.ID, Message: "AWG engine failed to start"})
 			slog.Warn("engine restart scheduled", "profile", p.Name, "delay", delay)
 			if !waitContext(ctx, delay) {
 				return
@@ -199,6 +202,7 @@ func (c *Controller) supervise(ctx context.Context, p *Profile, slot int) {
 			delay, history := retryDelay(time.Now(), p.restartTimes)
 			p.restartTimes = history
 			p.mu.Unlock()
+			c.appendEvent(ControllerEvent{At: time.Now().UTC(), Kind: "engine_restart", Profile: p.ID, Message: "AWG engine exited; restart scheduled"})
 			if p.transport != nil {
 				p.transport.CloseIdleConnections()
 			}

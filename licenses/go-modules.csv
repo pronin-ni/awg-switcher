@@ -1,2 +1,5 @@
 awg-switcher/cmd/awg-switcher,Unknown,MIT
+golang.org/x/crypto,https://cs.opensource.google/go/x/crypto/+/v0.58.0:LICENSE,BSD-3-Clause
+golang.org/x/sys/unix,https://cs.opensource.google/go/x/sys/+/v0.49.0:LICENSE,BSD-3-Clause
+golang.org/x/term,https://cs.opensource.google/go/x/term/+/v0.47.0:LICENSE,BSD-3-Clause
 gopkg.in/yaml.v3,https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE,MIT
