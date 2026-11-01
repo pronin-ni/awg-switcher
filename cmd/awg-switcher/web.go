@@ -747,6 +747,7 @@ func (s *webServer) diagnosticCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *webServer) networkDebug(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", 405)
 		return
@@ -773,6 +774,7 @@ func (s *webServer) downloadSupportBundle(w http.ResponseWriter, r *http.Request
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Disposition", `attachment; filename="awg-switcher-support.json"`)
 	writeJSON(w, s.controller.supportBundle())
 }
