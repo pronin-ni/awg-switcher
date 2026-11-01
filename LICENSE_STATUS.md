@@ -1,6 +1,6 @@
 # Licensing release gate
 
-**Status: LICENSE REVIEW REQUIRED** (as of 2026-11-01; Web UI feature branch).
+**Status: source/module license checks pass; public binary/container release review remains open** (as of 2026-11-01; merged to `main`).
 
 ## Completed checks
 
@@ -24,4 +24,4 @@
 5. Container base-image digests and Go toolchain image digests are pinned in `Dockerfile`; the successful VPS build confirms the pinned references and CA package version are available for Linux/amd64.
 6. No legal counsel has reviewed the result. Automated license detection does not constitute legal advice.
 
-The upstream tag signature is a supply-chain provenance concern, not by itself a license incompatibility. Given the remaining provenance/CA/legal review and pending candidate image audit, the project is not cleared for public binary/container release. GHCR publishing requires repository variables `ALLOW_PUBLIC_RELEASE=true`, `LICENSE_REVIEW_PASSED=true`, and `LIVE_VALIDATION_PASSED=true`; leave them unset until all technical and legal review gates pass.
+The upstream tag signature is a supply-chain provenance concern, not by itself a license incompatibility. These unresolved review items do not block merging the source to `main`; they do block a public binary/container release. GHCR publishing requires repository variables `ALLOW_PUBLIC_RELEASE=true`, `LICENSE_REVIEW_PASSED=true`, and `LIVE_VALIDATION_PASSED=true`; leave them unset until the release-specific review gates pass.
