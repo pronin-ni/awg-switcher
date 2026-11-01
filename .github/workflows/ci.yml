@@ -130,7 +130,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish development image
+      - id: image
+        name: Publish development image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -142,6 +143,10 @@ jobs:
             ghcr.io/${{ github.repository }}:${{ github.sha }}
           sbom: true
           provenance: mode=max
+
+      - name: Report development image digest
+        run: |
+          echo "Published ghcr.io/${GITHUB_REPOSITORY}:dev@${{ steps.image.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
 
   publish-ghcr:
     if: startsWith(github.ref, 'refs/tags/v') && vars.ALLOW_PUBLIC_RELEASE == 'true' && vars.LICENSE_REVIEW_PASSED == 'true' && vars.LIVE_VALIDATION_PASSED == 'true'
