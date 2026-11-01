@@ -27,7 +27,9 @@ COPY --from=build /out/awg-switcher /usr/local/bin/awg-switcher
 COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY LICENSE THIRD_PARTY_NOTICES.md DEPENDENCIES.md /usr/share/doc/awg-switcher/
 COPY licenses/ /usr/share/licenses/awg-switcher/
-USER 10001:10001
+# The application uses only CAP_CHOWN/SETGID/SETUID to initialize an empty
+# bind mount, then drops permanently to UID/GID 10001 before serving traffic.
+USER 0:0
 WORKDIR /app
 EXPOSE 20171 8080
 HEALTHCHECK --interval=20s --timeout=5s --start-period=90s --retries=3 CMD ["/usr/local/bin/awg-switcher", "healthcheck"]

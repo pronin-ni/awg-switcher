@@ -1,30 +1,28 @@
 services:
   awg-switcher:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: awg-switcher:2.1.0
+    image: ghcr.io/pronin-ni/awg-switcher:dev
     container_name: awg-switcher
     restart: unless-stopped
     stop_grace_period: 25s
     read_only: true
     tmpfs:
       - /run/awg-switcher:rw,noexec,nosuid,size=16m,uid=10001,gid=10001
+    ports:
+      - "192.168.31.12:2080:8080"
     volumes:
-      - ./configs:/app/configs:ro
-      - ./settings.yaml:/app/settings.yaml:ro
-      - ./data:/app/data
+      - /Volume2/docker/awg-switcher:/app/data
     environment:
       AWG_DATA_DIR: /app/data
       AWG_ADMIN_LISTEN: 0.0.0.0:8080
-      # Set true only when TLS terminates at a trusted reverse proxy.
       AWG_COOKIE_SECURE: "false"
     networks:
       - proxy-network
-    expose:
-      - "8080"
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
     security_opt:
       - no-new-privileges:true
     mem_limit: 512m

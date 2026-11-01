@@ -1232,16 +1232,51 @@ func proxyCopy(dst, src net.Conn) {
 	}
 }
 
+// prepareDataDir handles a fresh Docker bind mount without requiring the NAS
+// user to chown it. The container starts with only the three capabilities
+// needed to transfer ownership, then permanently drops to the application UID.
+func prepareDataDir(dir string) error {
+	if os.Geteuid() == 0 {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("create data directory: %w", err)
+		}
+		if err := os.Chown(dir, 10001, 10001); err != nil {
+			return fmt.Errorf("initialize data directory ownership: %w", err)
+		}
+		if err := syscall.Setgroups([]int{10001}); err != nil {
+			return fmt.Errorf("drop supplementary groups: %w", err)
+		}
+		if err := syscall.Setgid(10001); err != nil {
+			return fmt.Errorf("drop group privileges: %w", err)
+		}
+		if err := syscall.Setuid(10001); err != nil {
+			return fmt.Errorf("drop user privileges: %w", err)
+		}
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("create data directory: %w", err)
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		return fmt.Errorf("secure data directory: %w", err)
+	}
+	return nil
+}
+
 func main() {
 	dataDir := os.Getenv("AWG_DATA_DIR")
 	if dataDir == "" {
 		dataDir = "/app/data"
 	}
 	if len(os.Args) == 2 && os.Args[1] == "create-admin" {
+		if err := prepareDataDir(dataDir); err != nil {
+			slog.Error("data directory initialization failed", "error", err)
+			os.Exit(1)
+		}
 		if err := adminPasswordCLI(dataDir); err != nil {
 			slog.Error("administrator initialization failed", "error", err)
 			os.Exit(1)
 		}
+		_ = os.Remove(bootstrapPath(dataDir))
 		fmt.Println("Administrator initialized.")
 		return
 	}
@@ -1260,6 +1295,18 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	}
+	if err := prepareDataDir(dataDir); err != nil {
+		slog.Error("data directory initialization failed", "error", err)
+		os.Exit(1)
+	}
+	bootstrap, err := ensureBootstrapToken(dataDir)
+	if err != nil {
+		slog.Error("first-run setup initialization failed", "error", err)
+		os.Exit(1)
+	}
+	if bootstrap != "" {
+		slog.Warn("first administrator setup is required; enter this one-time code in the Web UI", "setup_code", bootstrap)
 	}
 	s, e := loadSettings()
 	if e != nil {
