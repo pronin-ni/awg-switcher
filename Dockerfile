@@ -15,11 +15,12 @@ ARG CA_CERTIFICATES_VERSION=20261020-r0
 RUN apk add --no-cache "ca-certificates-bundle=${CA_CERTIFICATES_VERSION}"
 
 FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine3.23@sha256:8a5046497cda39860b832ffdbe8dd66018a0f05bb01352f533a36e7e2ced66a0 AS build
+ARG APP_VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum* ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o /out/awg-switcher ./cmd/awg-switcher
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${APP_VERSION}" -o /out/awg-switcher ./cmd/awg-switcher
 
 FROM scratch
 COPY --from=wireproxy-build /out/wireproxy /usr/local/bin/wireproxy

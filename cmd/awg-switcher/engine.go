@@ -31,6 +31,38 @@ type ProcessEngine struct {
 	RuntimeDir string
 }
 
+// wireproxyConfig pins hostname lookups to the profile's in-tunnel resolver and
+// prefers IPv4. Upstream v2.1.0 chooses one address according to ResolveStrategy
+// (auto prefers IPv6 for dual-stack profiles) rather than retrying another family
+// after a failed target connect. The fallback DNS is sent through the tunnel;
+// if the profile cannot route it, the request fails closed rather than using NAS DNS.
+func wireproxyConfig(config []byte) []byte {
+	lines := strings.Split(strings.TrimSpace(string(config)), "\n")
+	section, hasDNS := "", false
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
+			section = strings.ToLower(trim[1 : len(trim)-1])
+			continue
+		}
+		if section == "interface" {
+			key, _, ok := strings.Cut(trim, "=")
+			if ok && strings.EqualFold(strings.TrimSpace(key), "DNS") {
+				hasDNS = true
+			}
+		}
+	}
+	if !hasDNS {
+		for i, line := range lines {
+			if strings.EqualFold(strings.TrimSpace(line), "[Peer]") {
+				lines = append(lines[:i], append([]string{"DNS = 1.1.1.1"}, lines[i:]...)...)
+				break
+			}
+		}
+	}
+	return []byte(strings.Join(lines, "\n") + "\n\n[Resolve]\nResolveStrategy = ipv4\n")
+}
+
 type processSession struct {
 	cmd        *exec.Cmd
 	addr       string
@@ -59,7 +91,7 @@ func (e ProcessEngine) Start(ctx context.Context, config []byte, socks string, s
 		return nil, errors.New("runtime directory unavailable")
 	}
 	path := filepath.Join(e.RuntimeDir, fmt.Sprintf("profile-%08x.conf", uint32(slot)))
-	data := strings.TrimSpace(string(config)) + fmt.Sprintf("\n\n[Socks5]\nBindAddress = %s\n", socks)
+	data := strings.TrimSpace(string(wireproxyConfig(config))) + fmt.Sprintf("\n[Socks5]\nBindAddress = %s\n", socks)
 	tmp, err := os.CreateTemp(e.RuntimeDir, fmt.Sprintf("profile-%d-*.tmp", slot))
 	if err != nil {
 		return nil, errors.New("runtime config creation failed")

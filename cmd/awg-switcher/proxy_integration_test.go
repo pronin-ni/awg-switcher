@@ -19,16 +19,17 @@ import (
 )
 
 type testSocks struct {
-	listener    net.Listener
-	target      string
-	accepts     atomic.Int32
-	hosts       chan string
-	closed      chan struct{}
-	wg          sync.WaitGroup
-	mu          sync.Mutex
-	connections map[net.Conn]struct{}
-	available   atomic.Bool
-	closeOnce   sync.Once
+	listener     net.Listener
+	target       string
+	connectDelay time.Duration
+	accepts      atomic.Int32
+	hosts        chan string
+	closed       chan struct{}
+	wg           sync.WaitGroup
+	mu           sync.Mutex
+	connections  map[net.Conn]struct{}
+	available    atomic.Bool
+	closeOnce    sync.Once
 }
 
 func newTestSocks(t *testing.T, target string) *testSocks {
@@ -77,7 +78,7 @@ func (s *testSocks) Close() {
 }
 func (s *testSocks) handle(client net.Conn) {
 	defer client.Close()
-	_ = client.SetDeadline(time.Now().Add(5 * time.Second))
+	_ = client.SetDeadline(time.Now().Add(20 * time.Second))
 	var hello [2]byte
 	if _, e := io.ReadFull(client, hello[:]); e != nil {
 		return
@@ -137,6 +138,9 @@ func (s *testSocks) handle(client net.Conn) {
 	if !s.available.Load() {
 		_, _ = client.Write([]byte{5, 5, 0, 1, 0, 0, 0, 0, 0, 0})
 		return
+	}
+	if s.connectDelay > 0 {
+		time.Sleep(s.connectDelay)
 	}
 	upstream, e := net.DialTimeout("tcp", s.target, 2*time.Second)
 	if e != nil {
@@ -335,6 +339,8 @@ func TestHTTPSConnectUsesSelectedSOCKSRoute(t *testing.T) {
 	}))
 	defer origin.Close()
 	socks := newTestSocks(t, strings.TrimPrefix(origin.URL, "https://"))
+	// CONNECT must use its independent 30s timeout, not the 8s healthcheck limit.
+	socks.connectDelay = 8200 * time.Millisecond
 	c := testController(t, socks.Addr())
 	proxy := httptest.NewServer(applicationHandler(c))
 	defer proxy.Close()
@@ -343,8 +349,9 @@ func TestHTTPSConnectUsesSelectedSOCKSRoute(t *testing.T) {
 	root := x509.NewCertPool()
 	root.AddCert(origin.Certificate())
 	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL), TLSClientConfig: &tls.Config{RootCAs: root, ServerName: "example.com"}, DisableKeepAlives: true}
-	client := http.Client{Transport: transport, Timeout: 5 * time.Second}
+	client := http.Client{Transport: transport, Timeout: 15 * time.Second}
 	req, _ := http.NewRequest(http.MethodGet, "https://example.com:"+strconv.Itoa(portOf(originURL.Host))+"/", nil)
+	started := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -353,6 +360,9 @@ func TestHTTPSConnectUsesSelectedSOCKSRoute(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != 200 || string(body) != "secure-response" {
 		t.Fatalf("status=%d body=%q", resp.StatusCode, body)
+	}
+	if elapsed := time.Since(started); elapsed < 8*time.Second {
+		t.Fatalf("delayed SOCKS CONNECT completed too soon to exercise timeout boundary: %s", elapsed)
 	}
 	select {
 	case host := <-socks.hosts:
@@ -372,13 +382,16 @@ func portOf(hostport string) int {
 
 func TestProxyRejectsAllTrafficWithoutHealthyProfile(t *testing.T) {
 	c := &Controller{settings: Settings{Failover: struct {
-		Enabled           bool          `yaml:"enabled"`
-		CheckInterval     time.Duration `yaml:"check_interval"`
-		CheckTimeout      time.Duration `yaml:"check_timeout"`
-		FailureThreshold  int           `yaml:"failure_threshold"`
-		RecoveryThreshold int           `yaml:"recovery_threshold"`
-		RecoveryInterval  time.Duration `yaml:"recovery_interval"`
-		SwitchCooldown    time.Duration `yaml:"switch_cooldown"`
+		Enabled               bool          `yaml:"enabled"`
+		CheckInterval         time.Duration `yaml:"check_interval"`
+		CheckTimeout          time.Duration `yaml:"check_timeout"`
+		ManualCheckTimeout    time.Duration `yaml:"manual_check_timeout"`
+		TLSHandshakeTimeout   time.Duration `yaml:"tls_handshake_timeout"`
+		ResponseHeaderTimeout time.Duration `yaml:"response_header_timeout"`
+		FailureThreshold      int           `yaml:"failure_threshold"`
+		RecoveryThreshold     int           `yaml:"recovery_threshold"`
+		RecoveryInterval      time.Duration `yaml:"recovery_interval"`
+		SwitchCooldown        time.Duration `yaml:"switch_cooldown"`
 	}{Enabled: true}}, requests: make(chan struct{}, 2)}
 	proxy := httptest.NewServer(c.proxyHandler())
 	defer proxy.Close()

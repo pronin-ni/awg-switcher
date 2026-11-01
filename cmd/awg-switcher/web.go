@@ -216,12 +216,23 @@ func (s *webServer) handler() http.Handler {
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 		_, _ = w.Write(b)
 	})
+	mux.HandleFunc("/diagnostics.js", func(w http.ResponseWriter, r *http.Request) {
+		b, e := webFiles.ReadFile("web/diagnostics.js")
+		if e != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		_, _ = w.Write(b)
+	})
 	mux.HandleFunc("/api/session", s.session)
 	mux.HandleFunc("/api/status", s.requireAuth(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.controller.snapshot()) }))
 	mux.HandleFunc("/api/events", s.requireAuth(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.controller.snapshot().Events) }))
 	mux.HandleFunc("/api/profiles", s.requireAuth(s.profiles))
 	mux.HandleFunc("/api/profiles/", s.requireAuth(s.profile))
 	mux.HandleFunc("/api/diagnostics/check", s.requireAuth(s.diagnosticCheck))
+	mux.HandleFunc("/api/diagnostics/debug", s.requireAuth(s.networkDebug))
+	mux.HandleFunc("/api/support-bundle", s.requireAuth(s.downloadSupportBundle))
 	mux.HandleFunc("/logout", s.requireAuth(s.logout))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -696,8 +707,9 @@ func (s *webServer) diagnosticCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		ID  string `json:"id"`
-		URL string `json:"url"`
+		ID        string `json:"id"`
+		URL       string `json:"url"`
+		FullCheck bool   `json:"full_check"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req) != nil {
 		http.Error(w, "invalid request", 400)
@@ -713,8 +725,56 @@ func (s *webServer) diagnosticCheck(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "profile not found", 404)
 		return
 	}
-	result := s.controller.checkURL(r.Context(), p, u.String())
-	writeJSON(w, result)
+	targets := []string{u.String()}
+	if req.FullCheck {
+		targets = []string{"https://api.ipify.org", "https://www.facebook.com/", "https://api.radarr.video/v1/search?q=xt"}
+	}
+	results := make([]map[string]any, 0, len(targets))
+	for _, target := range targets {
+		targetURL, _ := url.Parse(target)
+		trace := newNetworkTrace(p, targetURL.Hostname())
+		ctx := withNetworkTrace(r.Context(), trace)
+		result := s.controller.checkURL(ctx, p, target)
+		finished := trace.snapshot()
+		s.controller.debugNetworkTrace(finished)
+		results = append(results, result)
+	}
+	if req.FullCheck {
+		writeJSON(w, map[string]any{"profile_id": p.ID, "results": results})
+		return
+	}
+	writeJSON(w, results[0])
+}
+
+func (s *webServer) networkDebug(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	if r.Method == http.MethodGet {
+		enabled, until := s.controller.networkDebugState()
+		writeJSON(w, map[string]any{"enabled": enabled, "expires_at": until, "duration_seconds": 600})
+		return
+	}
+	var request struct {
+		Enabled bool `json:"enabled"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&request) != nil {
+		http.Error(w, "invalid request", 400)
+		return
+	}
+	until := s.controller.setNetworkDebug(request.Enabled)
+	writeJSON(w, map[string]any{"enabled": request.Enabled, "expires_at": until})
+}
+
+func (s *webServer) downloadSupportBundle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="awg-switcher-support.json"`)
+	writeJSON(w, s.controller.supportBundle())
 }
 
 type profileState struct {

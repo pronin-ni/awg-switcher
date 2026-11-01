@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"os/signal"
@@ -23,9 +25,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var version = "dev"
+
 type Settings struct {
 	Proxy struct {
-		HTTPPort int `yaml:"http_port"`
+		HTTPPort       int           `yaml:"http_port"`
+		ConnectTimeout time.Duration `yaml:"connect_timeout"`
 	} `yaml:"proxy"`
 	Profiles struct {
 		Directory string   `yaml:"directory"`
@@ -33,13 +38,16 @@ type Settings struct {
 		Priority  []string `yaml:"priority"`
 	} `yaml:"profiles"`
 	Failover struct {
-		Enabled           bool          `yaml:"enabled"`
-		CheckInterval     time.Duration `yaml:"check_interval"`
-		CheckTimeout      time.Duration `yaml:"check_timeout"`
-		FailureThreshold  int           `yaml:"failure_threshold"`
-		RecoveryThreshold int           `yaml:"recovery_threshold"`
-		RecoveryInterval  time.Duration `yaml:"recovery_interval"`
-		SwitchCooldown    time.Duration `yaml:"switch_cooldown"`
+		Enabled               bool          `yaml:"enabled"`
+		CheckInterval         time.Duration `yaml:"check_interval"`
+		CheckTimeout          time.Duration `yaml:"check_timeout"`
+		ManualCheckTimeout    time.Duration `yaml:"manual_check_timeout"`
+		TLSHandshakeTimeout   time.Duration `yaml:"tls_handshake_timeout"`
+		ResponseHeaderTimeout time.Duration `yaml:"response_header_timeout"`
+		FailureThreshold      int           `yaml:"failure_threshold"`
+		RecoveryThreshold     int           `yaml:"recovery_threshold"`
+		RecoveryInterval      time.Duration `yaml:"recovery_interval"`
+		SwitchCooldown        time.Duration `yaml:"switch_cooldown"`
 	} `yaml:"failover"`
 	Health struct {
 		URLs              []string `yaml:"urls"`
@@ -112,11 +120,17 @@ type Controller struct {
 	events            []ControllerEvent
 	onEvent           func()
 	activeConnections atomic.Int64
+	networkDebugMu    sync.Mutex
+	networkDebugUntil time.Time
+	networkTraces     []NetworkTrace
 }
 
 func defaults(s *Settings) {
 	if s.Proxy.HTTPPort == 0 {
 		s.Proxy.HTTPPort = 20171
+	}
+	if s.Proxy.ConnectTimeout == 0 {
+		s.Proxy.ConnectTimeout = 30 * time.Second
 	}
 	if s.Profiles.Directory == "" {
 		s.Profiles.Directory = "/app/configs"
@@ -126,6 +140,15 @@ func defaults(s *Settings) {
 	}
 	if s.Failover.CheckTimeout == 0 {
 		s.Failover.CheckTimeout = 8 * time.Second
+	}
+	if s.Failover.ManualCheckTimeout == 0 {
+		s.Failover.ManualCheckTimeout = 30 * time.Second
+	}
+	if s.Failover.TLSHandshakeTimeout == 0 {
+		s.Failover.TLSHandshakeTimeout = 10 * time.Second
+	}
+	if s.Failover.ResponseHeaderTimeout == 0 {
+		s.Failover.ResponseHeaderTimeout = 20 * time.Second
 	}
 	if s.Failover.FailureThreshold == 0 {
 		s.Failover.FailureThreshold = 2
@@ -166,7 +189,7 @@ func loadSettings() (Settings, error) {
 		s.Failover.Enabled = true
 	}
 	defaults(&s)
-	if s.Proxy.HTTPPort < 1 || s.Proxy.HTTPPort > 65535 || s.Failover.CheckTimeout <= 0 || s.Failover.CheckInterval <= 0 || s.Failover.FailureThreshold < 1 || s.Failover.RecoveryThreshold < 1 || s.Failover.RecoveryInterval <= 0 || s.Failover.SwitchCooldown < 0 || s.Health.RequiredSuccesses < 1 {
+	if s.Proxy.HTTPPort < 1 || s.Proxy.HTTPPort > 65535 || s.Proxy.ConnectTimeout <= 0 || s.Failover.CheckTimeout <= 0 || s.Failover.ManualCheckTimeout <= 0 || s.Failover.TLSHandshakeTimeout <= 0 || s.Failover.ResponseHeaderTimeout <= 0 || s.Failover.CheckInterval <= 0 || s.Failover.FailureThreshold < 1 || s.Failover.RecoveryThreshold < 1 || s.Failover.RecoveryInterval <= 0 || s.Failover.SwitchCooldown < 0 || s.Health.RequiredSuccesses < 1 {
 		return s, errors.New("invalid settings value")
 	}
 	for _, raw := range s.Health.URLs {
@@ -391,8 +414,8 @@ func (c *Controller) prepareProfile(p *Profile) {
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			return c.socksDial(ctx, p, address)
 		},
-		TLSHandshakeTimeout:   c.settings.Failover.CheckTimeout,
-		ResponseHeaderTimeout: 30 * time.Second,
+		TLSHandshakeTimeout:   c.settings.Failover.TLSHandshakeTimeout,
+		ResponseHeaderTimeout: c.settings.Failover.ResponseHeaderTimeout,
 		IdleConnTimeout:       90 * time.Second,
 		ForceAttemptHTTP2:     false,
 		MaxIdleConns:          32,
@@ -663,30 +686,128 @@ func (c *Controller) socksDial(ctx context.Context, p *Profile, address string) 
 	return c.socksDialAt(ctx, addr, address)
 }
 
-func (c *Controller) socksDialAt(ctx context.Context, socksAddr, address string) (net.Conn, error) {
-	d := net.Dialer{Timeout: c.settings.Failover.CheckTimeout}
-	conn, e := d.DialContext(ctx, "tcp", socksAddr)
-	if e != nil {
-		return nil, e
+type SOCKSError struct {
+	Stage       string
+	AddressType string
+	ReplyCode   *byte
+	Err         error
+}
+
+func (e *SOCKSError) Error() string {
+	if e.ReplyCode != nil {
+		return fmt.Sprintf("SOCKS5 CONNECT rejected: reply=%d (%s)", *e.ReplyCode, socksReplyDescription(*e.ReplyCode))
 	}
-	fail := func(e error) (net.Conn, error) { conn.Close(); return nil, e }
-	_ = conn.SetDeadline(time.Now().Add(c.settings.Failover.CheckTimeout))
+	return fmt.Sprintf("%s: %v", e.Stage, e.Err)
+}
+func (e *SOCKSError) Unwrap() error { return e.Err }
+
+func socksReplyDescription(code byte) string {
+	switch code {
+	case 1:
+		return "general failure"
+	case 2:
+		return "connection not allowed by ruleset"
+	case 3:
+		return "network unreachable"
+	case 4:
+		return "host unreachable"
+	case 5:
+		return "connection refused"
+	case 6:
+		return "TTL expired"
+	case 7:
+		return "command not supported"
+	case 8:
+		return "address type not supported"
+	default:
+		return "unknown reply"
+	}
+}
+
+func (c *Controller) connectTimeout() time.Duration {
+	if c.settings.Proxy.ConnectTimeout > 0 {
+		return c.settings.Proxy.ConnectTimeout
+	}
+	return 30 * time.Second
+}
+
+func operationDeadline(ctx context.Context, fallback time.Duration) time.Time {
+	if d, ok := ctx.Deadline(); ok {
+		return d
+	}
+	return time.Now().Add(fallback)
+}
+
+func (c *Controller) socksDialAt(ctx context.Context, socksAddr, address string) (net.Conn, error) {
+	trace := traceFromContext(ctx)
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, &SOCKSError{Stage: "target_address", Err: err}
+	}
+	addressType := "DOMAIN"
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	if ip != nil {
+		if ip.To4() != nil {
+			addressType = "IPv4"
+		} else {
+			addressType = "IPv6"
+		}
+	}
+	if trace != nil {
+		trace.mu.Lock()
+		trace.AddressType = addressType
+		trace.DNS = "not_observable_inside_engine"
+		trace.mu.Unlock()
+	}
+	timeout := c.connectTimeout()
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < timeout {
+		timeout = time.Until(deadline)
+	}
+	d := net.Dialer{Timeout: timeout}
+	started := time.Now()
+	conn, e := d.DialContext(ctx, "tcp", socksAddr)
+	if trace != nil {
+		trace.stage("socks_listener", stageStatus(e), time.Since(started), "local wireproxy listener")
+	}
+	if e != nil {
+		wrapped := &SOCKSError{Stage: "socks_listener", AddressType: addressType, Err: e}
+		trace.fail("socks_listener", wrapped)
+		return nil, wrapped
+	}
+	fail := func(stage string, cause error) (net.Conn, error) {
+		_ = conn.Close()
+		wrapped := &SOCKSError{Stage: stage, AddressType: addressType, Err: cause}
+		trace.fail(stage, wrapped)
+		return nil, wrapped
+	}
+	deadline := operationDeadline(ctx, timeout)
+	if e = conn.SetDeadline(deadline); e != nil {
+		return fail("socks_deadline", e)
+	}
+	started = time.Now()
 	if _, e = conn.Write([]byte{5, 1, 0}); e != nil {
-		return fail(e)
+		if trace != nil {
+			trace.stage("socks5_negotiation", "failed", time.Since(started), "")
+		}
+		return fail("socks5_negotiation", e)
 	}
 	var ans [2]byte
 	if _, e = ioReadFull(conn, ans[:]); e != nil || ans != [2]byte{5, 0} {
-		return fail(errors.New("SOCKS negotiation failed"))
+		if e == nil {
+			e = errors.New("method negotiation protocol mismatch")
+		}
+		if trace != nil {
+			trace.stage("socks5_negotiation", "failed", time.Since(started), "")
+		}
+		return fail("socks5_negotiation", e)
 	}
-	host, port, e := net.SplitHostPort(address)
-	if e != nil {
-		return fail(e)
+	if trace != nil {
+		trace.stage("socks5_negotiation", "success", time.Since(started), "no-auth method")
 	}
 	pn, e := strconv.Atoi(port)
 	if e != nil || pn < 1 || pn > 65535 {
-		return fail(errors.New("invalid destination port"))
+		return fail("target_address", errors.New("invalid destination port"))
 	}
-	ip := net.ParseIP(host)
 	req := []byte{5, 1, 0}
 	if ip4 := ip.To4(); ip4 != nil {
 		req = append(req, 1)
@@ -696,21 +817,38 @@ func (c *Controller) socksDialAt(ctx context.Context, socksAddr, address string)
 		req = append(req, ip6...)
 	} else {
 		if len(host) > 255 {
-			return fail(errors.New("hostname too long"))
+			return fail("target_address", errors.New("hostname too long"))
 		}
 		req = append(req, 3, byte(len(host)))
 		req = append(req, host...)
 	}
 	req = append(req, byte(pn>>8), byte(pn))
+	started = time.Now()
 	if _, e = conn.Write(req); e != nil {
-		return fail(e)
+		if trace != nil {
+			trace.stage("socks5_connect", "failed", time.Since(started), "")
+		}
+		return fail("socks5_connect", e)
 	}
 	var head [4]byte
 	if _, e = ioReadFull(conn, head[:]); e != nil {
-		return fail(errors.New("SOCKS connect response unavailable"))
+		if trace != nil {
+			trace.stage("socks5_connect", "failed", time.Since(started), "response not received")
+		}
+		return fail("socks5_connect", e)
 	}
 	if head[1] != 0 {
-		return fail(fmt.Errorf("SOCKS connect rejected with reply %d", head[1]))
+		code := head[1]
+		if trace != nil {
+			trace.mu.Lock()
+			trace.SOCKSReplyCode = &code
+			trace.mu.Unlock()
+			trace.stage("socks5_connect", "rejected", time.Since(started), socksReplyDescription(code))
+		}
+		wrapped := &SOCKSError{Stage: "socks5_connect", AddressType: addressType, ReplyCode: &code}
+		trace.fail("socks5_connect", wrapped)
+		_ = conn.Close()
+		return nil, wrapped
 	}
 	switch head[3] {
 	case 1:
@@ -727,14 +865,34 @@ func (c *Controller) socksDialAt(ctx context.Context, socksAddr, address string)
 		e = errors.New("invalid SOCKS response")
 	}
 	if e != nil {
-		return fail(e)
+		if trace != nil {
+			trace.stage("socks5_connect", "failed", time.Since(started), "invalid bound address response")
+		}
+		return fail("socks5_connect", e)
 	}
 	_, e = ioReadFull(conn, make([]byte, 2))
 	if e != nil {
-		return fail(e)
+		if trace != nil {
+			trace.stage("socks5_connect", "failed", time.Since(started), "bound port missing")
+		}
+		return fail("socks5_connect", e)
+	}
+	if trace != nil {
+		code := byte(0)
+		trace.mu.Lock()
+		trace.SOCKSReplyCode = &code
+		trace.mu.Unlock()
+		trace.stage("socks5_connect", "success", time.Since(started), "target TCP connection reported established by SOCKS5")
+		trace.stage("target_tcp_connect", "reported_success", time.Since(started), "not independently observable outside wireproxy")
 	}
 	_ = conn.SetDeadline(time.Time{})
 	return conn, nil
+}
+func stageStatus(err error) string {
+	if err != nil {
+		return "failed"
+	}
+	return "success"
 }
 func ioReadFull(r net.Conn, b []byte) (int, error) { return io.ReadFull(r, b) }
 func (c *Controller) dialActive(ctx context.Context, network, address string) (net.Conn, error) {
@@ -770,14 +928,14 @@ func (c *Controller) check(ctx context.Context, p *Profile) healthResult {
 		return healthResult{Reason: "engine_not_running", Latency: time.Since(started), Revision: revision}
 	}
 	if err := c.socksHandshake(ctx, session.SOCKSAddr()); err != nil {
-		return healthResult{Reason: "socks_unavailable", Latency: time.Since(started), Revision: revision}
+		return healthResult{Reason: classifyHealthError(err), Latency: time.Since(started), Revision: revision}
 	}
 	result := healthResult{TransportOK: true, Reason: "https_check_failed", Revision: revision}
 	successes := 0
 	var lastReason string
 	transport := &http.Transport{DialContext: func(x context.Context, n, a string) (net.Conn, error) {
 		return c.socksDialAt(x, session.SOCKSAddr(), a)
-	}, TLSHandshakeTimeout: c.settings.Failover.CheckTimeout, ResponseHeaderTimeout: c.settings.Failover.CheckTimeout, DisableKeepAlives: true}
+	}, TLSHandshakeTimeout: c.settings.Failover.TLSHandshakeTimeout, ResponseHeaderTimeout: c.settings.Failover.CheckTimeout, DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
 	client := http.Client{Transport: transport, Timeout: c.settings.Failover.CheckTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	for _, endpoint := range c.settings.Health.URLs {
@@ -824,75 +982,178 @@ func (c *Controller) check(ctx context.Context, p *Profile) healthResult {
 }
 
 func (c *Controller) checkURL(ctx context.Context, p *Profile, rawURL string) map[string]any {
-	started := time.Now()
 	parsedURL, _ := url.Parse(rawURL)
-	result := map[string]any{"profile_id": p.ID, "hostname": parsedURL.Hostname(), "dns": "delegated_to_socks5", "socks5": "not_checked", "tls": "not_checked", "http_status": 0}
+	host := ""
+	if parsedURL != nil {
+		host = parsedURL.Hostname()
+	}
+	trace := traceFromContext(ctx)
+	if trace == nil {
+		trace = newNetworkTrace(p, host)
+		ctx = withNetworkTrace(ctx, trace)
+	}
+	trace.stage("dns_resolution", "not_observable_inside_engine", 0, "hostname is delegated to wireproxy via SOCKS5 DOMAIN address")
 	p.mu.Lock()
 	session := p.session
 	healthy := p.Healthy
+	engineState := p.State
 	p.mu.Unlock()
-	if session == nil || !healthy {
-		result["error_type"] = "profile_unavailable"
-		result["error"] = "selected profile is not healthy"
-		result["duration_ms"] = time.Since(started).Milliseconds()
-		return result
+	trace.EngineState = engineState
+	// A diagnostic may probe a running profile that the health monitor currently
+	// marks unhealthy. It does not record health or alter global selection.
+	if session == nil {
+		trace.stage("engine", "not_running", 0, "selected profile has no active wireproxy process")
+		trace.fail("engine", errors.New("wireproxy engine is not running"))
+		trace.finish()
+		return diagnosticResult(trace.snapshot(), healthy)
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, c.settings.Failover.CheckTimeout)
+	probeCtx, cancel := context.WithTimeout(ctx, c.settings.Failover.ManualCheckTimeout)
 	defer cancel()
+	deadline, _ := probeCtx.Deadline()
+	trace.setDeadline("manual_diagnostic", deadline)
 	if err := c.socksHandshake(probeCtx, session.SOCKSAddr()); err != nil {
-		result["socks5"] = "listener_unavailable"
-		result["error_type"] = "socks_listener_unavailable"
-		result["error"] = "profile SOCKS5 listener is unavailable"
-		result["duration_ms"] = time.Since(started).Milliseconds()
-		return result
-	}
-	result["socks5"] = "negotiated"
-	transport := &http.Transport{DialContext: func(x context.Context, n, a string) (net.Conn, error) {
-		conn, err := c.socksDialAt(x, session.SOCKSAddr(), a)
-		if err == nil {
-			result["socks5"] = "connected"
-		} else {
-			result["socks5"] = "connect_rejected"
-			result["error_type"] = classifyHealthError(err)
+		var socksErr *SOCKSError
+		stage := "socks_listener"
+		if errors.As(err, &socksErr) {
+			stage = socksErr.Stage
 		}
-		return conn, err
-	}, TLSHandshakeTimeout: c.settings.Failover.CheckTimeout, ResponseHeaderTimeout: c.settings.Failover.CheckTimeout, DisableKeepAlives: true}
+		trace.fail(stage, err)
+		trace.finish()
+		return diagnosticResult(trace.snapshot(), healthy)
+	}
+	var timingMu sync.Mutex
+	var tlsStarted, httpStarted time.Time
+	clientTrace := &httptrace.ClientTrace{
+		TLSHandshakeStart: func() { timingMu.Lock(); tlsStarted = time.Now(); timingMu.Unlock() },
+		TLSHandshakeDone: func(_ tls.ConnectionState, err error) {
+			timingMu.Lock()
+			began := tlsStarted
+			timingMu.Unlock()
+			if err != nil {
+				trace.stage("tls_handshake", "failed", time.Since(began), "")
+				trace.fail("tls_handshake", err)
+			} else {
+				trace.stage("tls_handshake", "success", time.Since(began), "certificate verification succeeded")
+			}
+		},
+		GotFirstResponseByte: func() {
+			timingMu.Lock()
+			began := httpStarted
+			timingMu.Unlock()
+			if !began.IsZero() {
+				trace.stage("http_response", "headers_received", time.Since(began), "first response byte")
+			}
+		},
+	}
+	probeCtx = httptrace.WithClientTrace(probeCtx, clientTrace)
+	transport := &http.Transport{DialContext: func(x context.Context, n, a string) (net.Conn, error) {
+		return c.socksDialAt(x, session.SOCKSAddr(), a)
+	}, TLSHandshakeTimeout: c.settings.Failover.TLSHandshakeTimeout, ResponseHeaderTimeout: c.settings.Failover.ResponseHeaderTimeout, DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
-	client := http.Client{Transport: transport, Timeout: c.settings.Failover.CheckTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, rawURL, nil)
+	client := http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	requestCtx, requestCancel := context.WithTimeout(probeCtx, c.settings.Failover.ManualCheckTimeout)
+	defer requestCancel()
+	requestCtx = withNetworkTrace(requestCtx, trace)
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, rawURL, nil)
+	var response *http.Response
 	if err == nil {
-		var response *http.Response
+		timingMu.Lock()
+		httpStarted = time.Now()
+		timingMu.Unlock()
 		response, err = client.Do(req)
 		if response != nil {
-			result["http_status"] = response.StatusCode
+			trace.setHTTPStatus(response.StatusCode)
 			if response.TLS != nil {
-				result["tls"] = "verified"
+				trace.stage("tls_handshake", "success", 0, "verified")
 			}
+			timingMu.Lock()
+			began := httpStarted
+			timingMu.Unlock()
+			trace.stage("http_response", "headers_received", time.Since(began), "response headers received")
 			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
 			_ = response.Body.Close()
 		}
 	}
 	if err != nil {
-		errorType, _ := result["error_type"].(string)
-		if errorType == "" || errorType == "none" {
-			errorType = classifyHealthError(err)
+		stage := "http_response"
+		var socksErr *SOCKSError
+		if errors.As(err, &socksErr) {
+			stage = socksErr.Stage
+		} else if strings.Contains(strings.ToLower(err.Error()), "tls") {
+			stage = "tls_handshake"
 		}
-		result["error_type"] = errorType
-		result["error"] = "HTTPS probe failed: " + errorType
-	} else {
-		result["error_type"] = "none"
-		result["error"] = ""
+		trace.fail(stage, err)
+		timingMu.Lock()
+		began := httpStarted
+		timingMu.Unlock()
+		trace.stage(stage, "failed", time.Since(began), "")
+	} else if response != nil {
+		timingMu.Lock()
+		began := httpStarted
+		timingMu.Unlock()
+		trace.stage("http_response", "received", time.Since(began), fmt.Sprintf("HTTP %d", response.StatusCode))
 	}
-	result["duration_ms"] = time.Since(started).Milliseconds()
-	return result
+	trace.finish()
+	return diagnosticResult(trace.snapshot(), healthy)
+}
+
+func diagnosticResult(trace NetworkTrace, healthy bool) map[string]any {
+	return map[string]any{
+		"trace_id": trace.TraceID, "profile_id": trace.ProfileID, "profile_name": trace.ProfileName,
+		"profile_healthy": healthy, "engine_state": trace.EngineState, "hostname": trace.Hostname,
+		"address_type": trace.AddressType, "dns": trace.DNS, "stages": trace.Stages,
+		"socks_reply_code": trace.SOCKSReplyCode, "tls": trace.Stages["tls_handshake"].Status,
+		"http_status": trace.HTTPStatus, "failure_stage": trace.FailureStage,
+		"error_type": trace.ErrorType, "error": trace.Error,
+		"deadline": trace.Deadline, "duration_ms": trace.TotalDurationMS,
+	}
 }
 
 func healthHTTPStatusReachable(status int) bool { return status >= 100 && status <= 599 }
 
 func classifyHealthError(err error) string {
+	if err == nil {
+		return "none"
+	}
+	var socksErr *SOCKSError
 	var dnsErr *net.DNSError
 	var netErr net.Error
 	var urlErr *url.Error
+	if errors.As(err, &socksErr) {
+		var socksDNSErr *net.DNSError
+		if errors.As(socksErr.Err, &socksDNSErr) {
+			if socksDNSErr.IsTimeout {
+				return "dns_timeout"
+			}
+			return "dns_error"
+		}
+		var socksNetErr net.Error
+		if errors.As(socksErr.Err, &socksNetErr) && socksNetErr.Timeout() {
+			return "timeout"
+		}
+		if socksErr.ReplyCode != nil {
+			switch *socksErr.ReplyCode {
+			case 2:
+				return "socks_policy_rejected"
+			case 3:
+				return "socks_network_unreachable"
+			case 4:
+				return "socks_host_unreachable"
+			case 5:
+				return "socks_connection_refused"
+			case 8:
+				return "socks_address_type_unsupported"
+			default:
+				return "socks_target_rejected"
+			}
+		}
+		if socksErr.Stage == "socks5_negotiation" {
+			return "socks_negotiation_error"
+		}
+		if socksErr.Stage == "socks5_connect" {
+			return "socks_connect_error"
+		}
+	}
 	switch {
 	case strings.Contains(strings.ToLower(err.Error()), "socks connect rejected with reply 2"):
 		return "socks_policy_rejected"
@@ -918,23 +1179,45 @@ func classifyHealthError(err error) string {
 }
 
 func (c *Controller) socksHandshake(ctx context.Context, addr string) error {
-	d := net.Dialer{Timeout: c.settings.Failover.CheckTimeout}
+	trace := traceFromContext(ctx)
+	timeout := c.connectTimeout()
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < timeout {
+		timeout = time.Until(deadline)
+	}
+	d := net.Dialer{Timeout: timeout}
+	started := time.Now()
 	conn, err := d.DialContext(ctx, "tcp", addr)
+	if trace != nil {
+		trace.stage("socks_listener", stageStatus(err), time.Since(started), "local wireproxy SOCKS5 listener")
+	}
 	if err != nil {
-		return err
+		wrapped := &SOCKSError{Stage: "socks_listener", Err: err}
+		trace.fail("socks_listener", wrapped)
+		return wrapped
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(c.settings.Failover.CheckTimeout))
+	_ = conn.SetDeadline(operationDeadline(ctx, timeout))
+	started = time.Now()
 	if _, err = conn.Write([]byte{5, 1, 0}); err != nil {
-		return err
+		wrapped := &SOCKSError{Stage: "socks5_negotiation", Err: err}
+		trace.stage("socks5_negotiation", "failed", time.Since(started), "")
+		trace.fail("socks5_negotiation", wrapped)
+		return wrapped
 	}
 	var response [2]byte
 	if _, err = io.ReadFull(conn, response[:]); err != nil {
-		return err
+		wrapped := &SOCKSError{Stage: "socks5_negotiation", Err: err}
+		trace.stage("socks5_negotiation", "failed", time.Since(started), "")
+		trace.fail("socks5_negotiation", wrapped)
+		return wrapped
 	}
 	if response != [2]byte{5, 0} {
-		return errors.New("SOCKS method negotiation failed")
+		wrapped := &SOCKSError{Stage: "socks5_negotiation", Err: errors.New("method negotiation protocol mismatch")}
+		trace.stage("socks5_negotiation", "failed", time.Since(started), "")
+		trace.fail("socks5_negotiation", wrapped)
+		return wrapped
 	}
+	trace.stage("socks5_negotiation", "success", time.Since(started), "no-auth method negotiated; target connection not yet tested")
 	return nil
 }
 
@@ -1039,6 +1322,9 @@ func (c *Controller) recordHealth(p *Profile, result healthResult) {
 	if !result.Healthy && !wasHealthy {
 		c.appendEvent(ControllerEvent{At: time.Now().UTC(), Kind: "profile_error", Profile: p.ID, Message: result.Reason})
 	}
+	// Evaluate failover as soon as this profile's check completes. Do not wait
+	// for slower checks of unrelated profiles if a healthy backup is already known.
+	c.selectProfile()
 }
 func (c *Controller) selectProfile() {
 	c.mu.Lock()
@@ -1101,8 +1387,19 @@ func (c *Controller) selectProfile() {
 	if candidate != nil {
 		to = candidate.Name
 	}
+	message := from + " → " + to
+	if candidate == nil {
+		var states []string
+		for _, p := range profiles {
+			p.mu.Lock()
+			state, enabled := p.State, p.enabled
+			p.mu.Unlock()
+			states = append(states, fmt.Sprintf("%s=%s(enabled=%t)", p.ID, state, enabled))
+		}
+		message += "; no enabled healthy candidate; profiles: " + strings.Join(states, ", ")
+	}
 	slog.Info("profile switched", "from", from, "to", to)
-	c.appendEvent(ControllerEvent{At: time.Now().UTC(), Kind: "switch", Profile: to, Message: from + " → " + to})
+	c.appendEvent(ControllerEvent{At: time.Now().UTC(), Kind: "switch", Profile: to, Message: message})
 }
 
 func (c *Controller) appendEvent(event ControllerEvent) {
@@ -1160,12 +1457,36 @@ func (c *Controller) proxyHandler() http.Handler {
 			return
 		}
 		if r.Method == http.MethodConnect {
-			conn, e := c.dialActive(r.Context(), "tcp", r.Host)
+			connectCtx := r.Context()
+			var trace *NetworkTrace
+			if enabled, _ := c.networkDebugState(); enabled {
+				host, _, _ := net.SplitHostPort(r.Host)
+				trace = newNetworkTrace(c.active.Load(), host)
+				connectCtx = withNetworkTrace(connectCtx, trace)
+			}
+			connectCtx, cancelConnect := context.WithTimeout(connectCtx, c.connectTimeout())
+			if trace != nil {
+				deadline, _ := connectCtx.Deadline()
+				trace.setDeadline("proxy_connect", deadline)
+			}
+			started := time.Now()
+			conn, e := c.dialActive(connectCtx, "tcp", r.Host)
+			cancelConnect()
+			if trace != nil {
+				if e != nil {
+					trace.fail("socks5_connect", e)
+					trace.stage("socks5_connect", "failed", time.Since(started), "")
+				} else {
+					trace.stage("socks5_connect", "success", time.Since(started), "CONNECT established; TLS is opaque to the HTTP proxy")
+				}
+				trace.finish()
+				c.debugNetworkTrace(trace.snapshot())
+			}
 			if e != nil {
 				if strings.Contains(e.Error(), "no healthy VPN") || strings.Contains(e.Error(), "profile is unhealthy") {
 					http.Error(w, "no healthy VPN profile", http.StatusServiceUnavailable)
 				} else {
-					http.Error(w, "VPN transport failed: "+classifyHealthError(e), http.StatusBadGateway)
+					http.Error(w, "VPN transport failed at "+proxyFailureStage(e)+": "+classifyHealthError(e), http.StatusBadGateway)
 				}
 				return
 			}

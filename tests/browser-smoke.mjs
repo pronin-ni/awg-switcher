@@ -94,7 +94,16 @@ try {
   if (!afterRestart[0].includes('Приоритет 0') || !afterRestart[1].includes('Приоритет 1')) {
     throw new Error(`priorities changed after restart: ${afterRestart.join(' | ')}`);
   }
-  console.log('PASS: first-run setup, login, dashboard, two profile uploads, profile listing, priority reorder and restart/login persistence');
+  await page.locator('a[href="#diagnostics"]').click();
+  await page.locator('#network-debug').check();
+  await page.locator('#debug-state').getByText('активна').waitFor();
+  await page.locator('#network-debug').uncheck();
+  await page.locator('#debug-state').getByText('выключена').waitFor();
+  const downloadPromise = page.waitForEvent('download');
+  await page.locator('#download-support').click();
+  const report = await downloadPromise;
+  if (report.suggestedFilename() !== 'awg-switcher-support.json') throw new Error('unexpected support report filename');
+  console.log('PASS: first-run setup, login, profile upload/order persistence, Network Debug toggle and support report download');
 } finally {
   await browser?.close();
   try { docker('rm', '-f', name); } catch {}

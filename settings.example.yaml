@@ -1,5 +1,6 @@
 proxy:
   http_port: 20171
+  connect_timeout: 30s
 # Web UI/admin API listen on 8080 and are not published to the host by default.
 # Set AWG_ADMIN_LISTEN in Compose only when intentionally binding to a trusted interface.
 profiles:
@@ -13,6 +14,9 @@ failover:
   enabled: true
   check_interval: 15s
   check_timeout: 8s
+  manual_check_timeout: 30s
+  tls_handshake_timeout: 10s
+  response_header_timeout: 20s
   failure_threshold: 2
   recovery_threshold: 3
   recovery_interval: 60s

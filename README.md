@@ -80,7 +80,8 @@ For Docker-only development from a checkout, use `docker-compose.dev.yml`; the P
 
 - Dashboard with active route, health, profile counts, switch count, uptime and in-flight proxy requests; polling refreshes the display. A bounded event history survives container restarts.
 - Import `.conf` at up to 1 MiB each, multiple files, drag-and-drop, safe view, profile rename, priority, enable/disable, manual primary selection (30-minute maximum), health check and deletion of imported profiles.
-- URL diagnostics accepts HTTPS only and probes through the selected profile's SOCKS5 route. DNS resolution for the target hostname is requested through SOCKS5; there is no direct fallback.
+- URL diagnostics accepts HTTPS only and probes the selected profile without changing global failover. Network Debug is opt-in for 10 minutes; the bounded JSON support report excludes profile errors, URL paths/queries, credentials, and engine output. “Full connection check” probes ipify, Facebook, and Radarr sequentially through that same profile.
+- Health checks retain the 8-second timeout. Manual diagnostics default to 30 seconds, proxy CONNECT to 30 seconds, TLS handshake to 10 seconds, and HTTP response headers to 20 seconds. DNS resolution is delegated to wireproxy and reported as unobservable at the application boundary; there is no direct fallback.
 - English/Russian interface, responsive layout and light/dark system mode. Language/theme preferences are the only UI settings in localStorage; credentials and config secrets are not.
 
 `/healthz` reports process liveness and `/readyz` is 200 only with an active healthy VPN. When there are no configs, the process and UI remain available while readiness and proxy requests fail closed.

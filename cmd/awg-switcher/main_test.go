@@ -179,13 +179,16 @@ func TestProxyNeverFallsBackDirect(t *testing.T) {
 
 func TestSelectProfileUsesPriorityAndAtomicActive(t *testing.T) {
 	c := &Controller{settings: Settings{Failover: struct {
-		Enabled           bool          `yaml:"enabled"`
-		CheckInterval     time.Duration `yaml:"check_interval"`
-		CheckTimeout      time.Duration `yaml:"check_timeout"`
-		FailureThreshold  int           `yaml:"failure_threshold"`
-		RecoveryThreshold int           `yaml:"recovery_threshold"`
-		RecoveryInterval  time.Duration `yaml:"recovery_interval"`
-		SwitchCooldown    time.Duration `yaml:"switch_cooldown"`
+		Enabled               bool          `yaml:"enabled"`
+		CheckInterval         time.Duration `yaml:"check_interval"`
+		CheckTimeout          time.Duration `yaml:"check_timeout"`
+		ManualCheckTimeout    time.Duration `yaml:"manual_check_timeout"`
+		TLSHandshakeTimeout   time.Duration `yaml:"tls_handshake_timeout"`
+		ResponseHeaderTimeout time.Duration `yaml:"response_header_timeout"`
+		FailureThreshold      int           `yaml:"failure_threshold"`
+		RecoveryThreshold     int           `yaml:"recovery_threshold"`
+		RecoveryInterval      time.Duration `yaml:"recovery_interval"`
+		SwitchCooldown        time.Duration `yaml:"switch_cooldown"`
 	}{Enabled: true, SwitchCooldown: time.Second}}}
 	primary := &Profile{Name: "primary", Priority: 0, Healthy: true, enabled: true}
 	backup := &Profile{Name: "backup", Priority: 1, Healthy: true, enabled: true}
