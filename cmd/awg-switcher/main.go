@@ -1075,6 +1075,15 @@ func (c *Controller) checkURL(ctx context.Context, p *Profile, rawURL string) ma
 		}
 	}
 	if err != nil {
+		select {
+		case <-session.Done():
+			trace.EngineState = "stopped_during_probe"
+			trace.stage("engine", "stopped", 0, "wireproxy process exited during the request")
+			trace.fail("engine", errors.New("wireproxy process exited during diagnostic request"))
+			trace.finish()
+			return diagnosticResult(trace.snapshot(), healthy)
+		default:
+		}
 		stage := "http_response"
 		var socksErr *SOCKSError
 		if errors.As(err, &socksErr) {

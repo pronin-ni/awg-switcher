@@ -250,6 +250,9 @@ func TestDiagnosticResponseOmitsURLPathAndQuery(t *testing.T) {
 	if result["hostname"] != "example.test" {
 		t.Fatalf("hostname=%v", result["hostname"])
 	}
+	if result["error_type"] != "engine_unavailable" {
+		t.Fatalf("missing engine classified as %v", result["error_type"])
+	}
 	encoded, _ := json.Marshal(result)
 	if bytes.Contains(encoded, []byte("synthetic-token")) || bytes.Contains(encoded, []byte("private/path")) {
 		t.Fatal("diagnostic response contains URL path/query data")

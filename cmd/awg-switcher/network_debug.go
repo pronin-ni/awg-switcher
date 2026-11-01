@@ -102,7 +102,11 @@ func (t *NetworkTrace) fail(stage string, err error) {
 	}
 	unlock := t.lock()
 	t.FailureStage = stage
-	t.ErrorType = classifyHealthError(err)
+	if stage == "engine" {
+		t.ErrorType = "engine_unavailable"
+	} else {
+		t.ErrorType = classifyHealthError(err)
+	}
 	// Error text is limited to the concrete transport error; no request content
 	// or URL path/query can enter this value.
 	t.Error = safeTransportError(err)
