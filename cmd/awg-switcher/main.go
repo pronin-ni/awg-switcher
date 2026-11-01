@@ -232,6 +232,14 @@ func normalizeWG(data []byte) ([]byte, error) {
 		if !known[key] {
 			return nil, fmt.Errorf("line %d: unsupported setting %q", n+1, strings.TrimSpace(k))
 		}
+		if section != wireGuardSettingSection(key) {
+			return nil, fmt.Errorf("line %d: %s is not valid in [%s]", n+1, strings.TrimSpace(k), section)
+		}
+		if wireGuardRangeSetting(key) {
+			if _, err := parseWireGuardUintRange(strings.TrimSpace(v)); err != nil {
+				return nil, fmt.Errorf("line %d: invalid %s range", n+1, strings.TrimSpace(k))
+			}
+		}
 		if section == "interface" {
 			hasKey = hasKey || key == "privatekey"
 			if key == "address" {
@@ -269,6 +277,53 @@ func normalizeWG(data []byte) ([]byte, error) {
 		return nil, errors.New("required [Interface] PrivateKey and [Peer] missing")
 	}
 	return []byte(strings.Join(out, "\n")), nil
+}
+
+func wireGuardSettingSection(key string) string {
+	switch key {
+	case "address", "privatekey", "listenport", "dns", "mtu", "jc", "jmin", "jmax", "s1", "s2", "s3", "s4", "h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5", "headerprotectionkey", "contentpaddingaddition", "rekeyaftertime", "rekeytimeout", "rejectaftertime", "keepalivetimeout", "maxhandshakeattempts", "randomtrailers", "disablecookies":
+		return "interface"
+	default:
+		return "peer"
+	}
+}
+
+func wireGuardRangeSetting(key string) bool {
+	switch key {
+	case "persistentkeepalive", "h1", "h2", "h3", "h4", "contentpaddingaddition", "rekeyaftertime", "rekeytimeout", "rejectaftertime", "keepalivetimeout", "maxhandshakeattempts":
+		return true
+	default:
+		return false
+	}
+}
+
+// parseWireGuardUintRange validates the exact scalar/range grammar consumed by
+// awg-wireproxy and amneziawg-go/v3 without rewriting the user's value.
+func parseWireGuardUintRange(value string) ([2]uint32, error) {
+	var result [2]uint32
+	parts := strings.Split(value, "-")
+	if len(parts) < 1 || len(parts) > 2 || parts[0] == "" {
+		return result, errors.New("invalid unsigned integer range")
+	}
+	lo, err := strconv.ParseUint(parts[0], 10, 32)
+	if err != nil {
+		return result, err
+	}
+	hi := lo
+	if len(parts) == 2 {
+		if parts[1] == "" {
+			return result, errors.New("invalid unsigned integer range")
+		}
+		hi, err = strconv.ParseUint(parts[1], 10, 32)
+		if err != nil {
+			return result, err
+		}
+	}
+	if lo > hi {
+		return result, errors.New("inverted unsigned integer range")
+	}
+	result[0], result[1] = uint32(lo), uint32(hi)
+	return result, nil
 }
 
 func discover(s Settings) ([]*Profile, error) {

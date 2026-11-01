@@ -56,6 +56,136 @@ func TestNormalizeRequiresPeerAndKey(t *testing.T) {
 	}
 }
 
+func TestNormalizeRejectsInvalidWireGuardRanges(t *testing.T) {
+	for _, test := range []struct {
+		field   string
+		section string
+	}{
+		{"PersistentKeepalive = 35-25", "peer"},
+		{"ContentPaddingAddition = 10-", "interface"},
+		{"RekeyAfterTime = 4-4294967296", "interface"},
+		{"KeepaliveTimeout = not-a-range", "interface"},
+	} {
+		config := validWG + "\n" + test.field + "\n"
+		if test.section == "interface" {
+			config = strings.Replace(validWG, "[Peer]", test.field+"\n[Peer]", 1)
+		}
+		_, err := normalizeWG([]byte(config))
+		if err == nil || !strings.Contains(err.Error(), "invalid") {
+			t.Errorf("%q was not rejected safely: %v", test.field, err)
+		}
+	}
+}
+
+func TestNormalizeRejectsKnownSettingsInWrongSection(t *testing.T) {
+	_, err := normalizeWG([]byte(validWG + "ContentPaddingAddition = 10-100\n"))
+	if err == nil || !strings.Contains(err.Error(), "not valid in [peer]") {
+		t.Fatalf("AWG 3.x interface setting in [Peer] was not rejected: %v", err)
+	}
+}
+
+func TestAWG3ValuesAndLargeCPSSurviveRuntimeConfig(t *testing.T) {
+	i1 := "<b 0x" + strings.Repeat("ab", 625) + ">"
+	config := `[Interface]
+PrivateKey = <SYNTHETIC-TEST-NOT-SECRET>
+Address = 172.16.0.2, 2606:4700:110:8a42::2
+MTU = 1280
+Jc = 12
+S1 = 0
+S2 = 0
+S3 = 0
+S4 = 0
+H1 = 1
+H2 = 2
+H3 = 3
+H4 = 4
+I1 = ` + i1 + `
+ContentPaddingAddition = 10-100
+RekeyAfterTime = 100-120
+RekeyTimeout = 3-7
+RejectAfterTime = 150-180
+KeepaliveTimeout = 5-15
+MaxHandshakeAttempts = 15-20
+[Peer]
+PublicKey = synthetic-public-key
+Endpoint = vpn.example.test:2408
+PersistentKeepalive = 25-35
+AllowedIPs = 0.0.0.0/0
+`
+	normalized, err := normalizeWG([]byte(config))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeConfig := wireproxyConfig(normalized)
+	for _, want := range []string{
+		"MTU = 1280", "I1 = " + i1,
+		"ContentPaddingAddition = 10-100", "RekeyAfterTime = 100-120",
+		"RekeyTimeout = 3-7", "RejectAfterTime = 150-180",
+		"KeepaliveTimeout = 5-15", "MaxHandshakeAttempts = 15-20",
+		"PersistentKeepalive = 25-35", "AllowedIPs = 0.0.0.0/0",
+		"ResolveStrategy = ipv4",
+	} {
+		if !strings.Contains(string(runtimeConfig), want) {
+			t.Errorf("runtime config lost parameter %q", want)
+		}
+	}
+	if !strings.Contains(string(runtimeConfig), "172.16.0.2/32") || !strings.Contains(string(runtimeConfig), "/128") {
+		t.Fatal("dual-stack Address prefixes were not preserved in runtime config")
+	}
+}
+
+func TestAWG30CPSPayloadSurvivesRuntimeConfig(t *testing.T) {
+	i1 := "<b 0x" + strings.Repeat("de", 340) + ">"
+	config := strings.Replace(validWG, "[Peer]", "I1 = "+i1+"\n[Peer]", 1)
+	normalized, err := normalizeWG([]byte(config))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(wireproxyConfig(normalized)), "I1 = "+i1) {
+		t.Fatal("AWG 3.0 CPS I1 was changed by normalization/runtime configuration")
+	}
+}
+
+func TestProcessEngineTransmitsAWG3RangesAndCPS(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "fake-engine")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexec /bin/sleep 60\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	i1 := "<b 0x" + strings.Repeat("cd", 625) + ">"
+	configText := strings.ReplaceAll(validWG, "Jc = 4", "Jc = 12")
+	configText = strings.ReplaceAll(configText, "S3 = 12", "S1 = 0\nS2 = 0\nS3 = 0\nS4 = 0")
+	configText = strings.ReplaceAll(configText, "AllowedIPs = 0.0.0.0/0, ::/0", "AllowedIPs = 0.0.0.0/0")
+	interfaceParams := "H1 = 1\nH2 = 2\nH3 = 3\nH4 = 4\nI1 = " + i1 + "\nContentPaddingAddition = 10-100\nRekeyAfterTime = 100-120\nRekeyTimeout = 3-7\nRejectAfterTime = 150-180\nKeepaliveTimeout = 5-15\nMaxHandshakeAttempts = 15-20\n"
+	configText = strings.Replace(configText, "[Peer]", interfaceParams+"[Peer]", 1)
+	configText = strings.Replace(configText, "Endpoint = vpn.example.test:51820", "Endpoint = vpn.example.test:51820\nPersistentKeepalive = 25-35", 1)
+	config := []byte(configText)
+	normalized, err := normalizeWG(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeDir := filepath.Join(dir, "runtime")
+	engine := ProcessEngine{Binary: binary, RuntimeDir: runtimeDir}
+	session, err := engine.Start(context.Background(), normalized, "127.0.0.1:21000", 17)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := os.ReadFile(filepath.Join(runtimeDir, "profile-00000011.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{i1, "ContentPaddingAddition = 10-100", "PersistentKeepalive = 25-35", "MaxHandshakeAttempts = 15-20"} {
+		if !strings.Contains(string(runtime), want) {
+			t.Errorf("engine runtime config lost %q", want)
+		}
+	}
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := session.Stop(stopCtx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSettingsDurationStrings(t *testing.T) {
 	var s Settings
 	if err := yaml.Unmarshal([]byte("failover:\n  check_interval: 15s\n  check_timeout: 8s\n"), &s); err != nil {
