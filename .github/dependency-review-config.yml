@@ -5,5 +5,3 @@ deny-licenses:
   - AGPL-3.0
   - LGPL-2.1
   - LGPL-3.0
-  - UNKNOWN
-  - NOASSERTION

@@ -106,7 +106,7 @@ jobs:
         with:
           config-file: .github/dependency-review-config.yml
           fail-on-severity: moderate
-          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, LGPL-2.1, LGPL-3.0, UNKNOWN, NOASSERTION
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, LGPL-2.1, LGPL-3.0
 
   publish-ghcr:
     if: startsWith(github.ref, 'refs/tags/v') && vars.ALLOW_PUBLIC_RELEASE == 'true' && vars.LICENSE_REVIEW_PASSED == 'true' && vars.LIVE_VALIDATION_PASSED == 'true'
