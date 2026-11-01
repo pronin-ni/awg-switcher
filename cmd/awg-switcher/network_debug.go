@@ -13,6 +13,7 @@ import (
 )
 
 const maxNetworkTraces = 100
+const networkTraceRetention = 10 * time.Minute
 
 type traceContextKey struct{}
 
@@ -177,6 +178,7 @@ func (t *NetworkTrace) snapshot() NetworkTrace {
 
 func (c *Controller) recordNetworkTrace(t NetworkTrace) {
 	c.networkDebugMu.Lock()
+	c.pruneNetworkTracesLocked(time.Now())
 	c.networkTraces = append(c.networkTraces, t)
 	if len(c.networkTraces) > maxNetworkTraces {
 		c.networkTraces = append([]NetworkTrace(nil), c.networkTraces[len(c.networkTraces)-maxNetworkTraces:]...)
@@ -210,9 +212,21 @@ func (c *Controller) setNetworkDebug(enabled bool) time.Time {
 func (c *Controller) networkTraceSnapshot() []NetworkTrace {
 	c.networkDebugMu.Lock()
 	defer c.networkDebugMu.Unlock()
+	c.pruneNetworkTracesLocked(time.Now())
 	result := make([]NetworkTrace, len(c.networkTraces))
 	copy(result, c.networkTraces)
 	return result
+}
+
+func (c *Controller) pruneNetworkTracesLocked(now time.Time) {
+	cutoff := now.Add(-networkTraceRetention)
+	first := 0
+	for first < len(c.networkTraces) && c.networkTraces[first].StartedAt.Before(cutoff) {
+		first++
+	}
+	if first > 0 {
+		c.networkTraces = append([]NetworkTrace(nil), c.networkTraces[first:]...)
+	}
 }
 
 func appRuntimeVersion() string { return version + " (" + runtime.Version() + ")" }

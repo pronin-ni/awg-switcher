@@ -28,6 +28,17 @@ func TestNetworkDebugExpiresAndCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestNetworkTraceHistoryExpiresAfterTenMinutes(t *testing.T) {
+	c := &Controller{networkTraces: []NetworkTrace{
+		{TraceID: "old", StartedAt: time.Now().Add(-networkTraceRetention - time.Second)},
+		{TraceID: "recent", StartedAt: time.Now()},
+	}}
+	traces := c.networkTraceSnapshot()
+	if len(traces) != 1 || traces[0].TraceID != "recent" {
+		t.Fatalf("trace retention did not prune old events: %+v", traces)
+	}
+}
+
 func TestSupportBundleRedactsProfileAndDiagnosticSecrets(t *testing.T) {
 	p := &Profile{ID: "safe-id", Name: "vpn", State: "HEALTHY", LastError: "https://user:password@example.test/?token=secret"}
 	c := &Controller{profiles: []*Profile{p}, events: []ControllerEvent{{Kind: "profile_error", Message: "https://example.test/?token=secret"}}}
