@@ -50,8 +50,9 @@ type Settings struct {
 		SwitchCooldown        time.Duration `yaml:"switch_cooldown"`
 	} `yaml:"failover"`
 	Health struct {
-		URLs              []string `yaml:"urls"`
-		RequiredSuccesses int      `yaml:"required_successes"`
+		URLs                   []string `yaml:"urls"`
+		RequiredSuccesses      int      `yaml:"required_successes"`
+		MinimumHealthyProfiles int      `yaml:"minimum_healthy_profiles"`
 	} `yaml:"health"`
 }
 
@@ -61,6 +62,12 @@ type Profile struct {
 	Priority        int       `json:"priority"`
 	State           string    `json:"state"`
 	Healthy         bool      `json:"healthy"`
+	ServiceHealthy  bool      `json:"service_healthy"`
+	ConnectivityOK  bool      `json:"connectivity_healthy"`
+	Availability24H float64   `json:"availability_24h"`
+	Availability7D  float64   `json:"availability_7d"`
+	Service24H      float64   `json:"service_health_24h"`
+	Service7D       float64   `json:"service_health_7d"`
 	LastError       string    `json:"last_error,omitempty"`
 	LastCheck       time.Time `json:"last_check,omitempty"`
 	LastSuccess     time.Time `json:"last_success,omitempty"`
@@ -82,16 +89,28 @@ type Profile struct {
 	cancel          context.CancelFunc
 	done            chan struct{}
 	configRevision  uint64
+	passiveFailures int
+	confirming      bool
+	healthySince    time.Time
+}
+type HealthSample struct {
+	At             time.Time `json:"at"`
+	Profile        string    `json:"profile"`
+	ConnectivityOK bool      `json:"connectivity_ok"`
+	ServiceOK      bool      `json:"service_ok"`
+	Reason         string    `json:"reason,omitempty"`
 }
 type Snapshot struct {
-	Active            string            `json:"active,omitempty"`
-	Profiles          []*Profile        `json:"profiles"`
-	Since             time.Time         `json:"since"`
-	Switches          uint64            `json:"switches"`
-	LastSwitch        time.Time         `json:"last_switch,omitempty"`
-	ManualUntil       time.Time         `json:"manual_until,omitempty"`
-	ActiveConnections int64             `json:"active_connections"`
-	Events            []ControllerEvent `json:"events"`
+	Active                 string            `json:"active,omitempty"`
+	Profiles               []*Profile        `json:"profiles"`
+	Since                  time.Time         `json:"since"`
+	Switches               uint64            `json:"switches"`
+	LastSwitch             time.Time         `json:"last_switch,omitempty"`
+	ManualUntil            time.Time         `json:"manual_until,omitempty"`
+	ActiveConnections      int64             `json:"active_connections"`
+	MinimumHealthyProfiles int               `json:"minimum_healthy_profiles"`
+	FailureDomainNote      string            `json:"failure_domain_note"`
+	Events                 []ControllerEvent `json:"events"`
 }
 type ControllerEvent struct {
 	At      time.Time `json:"at"`
@@ -123,6 +142,8 @@ type Controller struct {
 	networkDebugMu    sync.Mutex
 	networkDebugUntil time.Time
 	networkTraces     []NetworkTrace
+	healthMu          sync.Mutex
+	healthHistory     []HealthSample
 }
 
 func defaults(s *Settings) {
@@ -168,6 +189,9 @@ func defaults(s *Settings) {
 	if s.Health.RequiredSuccesses == 0 {
 		s.Health.RequiredSuccesses = 1
 	}
+	if s.Health.MinimumHealthyProfiles == 0 {
+		s.Health.MinimumHealthyProfiles = 2
+	}
 }
 func loadSettings() (Settings, error) {
 	s := Settings{}
@@ -189,7 +213,7 @@ func loadSettings() (Settings, error) {
 		s.Failover.Enabled = true
 	}
 	defaults(&s)
-	if s.Proxy.HTTPPort < 1 || s.Proxy.HTTPPort > 65535 || s.Proxy.ConnectTimeout <= 0 || s.Failover.CheckTimeout <= 0 || s.Failover.ManualCheckTimeout <= 0 || s.Failover.TLSHandshakeTimeout <= 0 || s.Failover.ResponseHeaderTimeout <= 0 || s.Failover.CheckInterval <= 0 || s.Failover.FailureThreshold < 1 || s.Failover.RecoveryThreshold < 1 || s.Failover.RecoveryInterval <= 0 || s.Failover.SwitchCooldown < 0 || s.Health.RequiredSuccesses < 1 {
+	if s.Proxy.HTTPPort < 1 || s.Proxy.HTTPPort > 65535 || s.Proxy.ConnectTimeout <= 0 || s.Failover.CheckTimeout <= 0 || s.Failover.ManualCheckTimeout <= 0 || s.Failover.TLSHandshakeTimeout <= 0 || s.Failover.ResponseHeaderTimeout <= 0 || s.Failover.CheckInterval <= 0 || s.Failover.FailureThreshold < 1 || s.Failover.RecoveryThreshold < 1 || s.Failover.RecoveryInterval <= 0 || s.Failover.SwitchCooldown < 0 || s.Health.RequiredSuccesses < 1 || s.Health.MinimumHealthyProfiles < 1 {
 		return s, errors.New("invalid settings value")
 	}
 	for _, raw := range s.Health.URLs {
@@ -633,6 +657,8 @@ func (c *Controller) setProfileEnabled(id string, enabled bool) error {
 	cancel, done := p.cancel, p.done
 	if !enabled {
 		p.Healthy = false
+		p.ConnectivityOK = false
+		p.ServiceHealthy = false
 		p.State = "DISABLED"
 		p.LastError = ""
 	}
@@ -699,6 +725,8 @@ func (c *Controller) removeRuntimeProfile(id string) error {
 	// Mark unavailable and choose the failover route before stopping the engine.
 	p.mu.Lock()
 	p.Healthy = false
+	p.ConnectivityOK = false
+	p.ServiceHealthy = false
 	p.State = "DISABLED"
 	p.enabled = false
 	cancel, done := p.cancel, p.done
@@ -745,6 +773,8 @@ func (c *Controller) replaceRuntimeConfig(id string, config []byte) error {
 	p.configRevision++
 	wasActive := c.active.Load() == p
 	p.Healthy = false
+	p.ConnectivityOK = false
+	p.ServiceHealthy = false
 	p.Successes = 0
 	p.Failures = 0
 	p.State = "CONNECTING"
@@ -783,6 +813,45 @@ func (e *SOCKSError) Error() string {
 	return fmt.Sprintf("%s: %v", e.Stage, e.Err)
 }
 func (e *SOCKSError) Unwrap() error { return e.Err }
+
+func isTransportFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	var socksErr *SOCKSError
+	var netErr net.Error
+	return errors.As(err, &socksErr) || errors.As(err, &netErr)
+}
+
+func (c *Controller) noteProxyFailure(p *Profile, err error) {
+	if p == nil || !isTransportFailure(err) {
+		return
+	}
+	p.mu.Lock()
+	p.passiveFailures++
+	threshold := c.settings.Failover.FailureThreshold
+	if threshold < 1 {
+		threshold = 2
+	}
+	trigger := p.passiveFailures >= threshold && !p.confirming
+	if trigger {
+		p.confirming = true
+	}
+	p.mu.Unlock()
+	if !trigger {
+		return
+	}
+	go func() {
+		defer func() { p.mu.Lock(); p.confirming = false; p.mu.Unlock() }()
+		timeout := c.settings.Failover.CheckTimeout
+		if timeout <= 0 {
+			timeout = 8 * time.Second
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		c.recordHealth(p, c.check(ctx, p))
+	}()
+}
 
 func socksReplyDescription(code byte) string {
 	switch code {
@@ -980,6 +1049,10 @@ func stageStatus(err error) string {
 func ioReadFull(r net.Conn, b []byte) (int, error) { return io.ReadFull(r, b) }
 func (c *Controller) dialActive(ctx context.Context, network, address string) (net.Conn, error) {
 	p := c.active.Load()
+	return c.dialProfile(ctx, p, address)
+}
+
+func (c *Controller) dialProfile(ctx context.Context, p *Profile, address string) (net.Conn, error) {
 	if p == nil {
 		return nil, errors.New("no healthy VPN profile")
 	}
@@ -994,6 +1067,7 @@ func (c *Controller) dialActive(ctx context.Context, network, address string) (n
 
 type healthResult struct {
 	Healthy     bool
+	ServiceOK   bool
 	TransportOK bool
 	Reason      string
 	Latency     time.Duration
@@ -1013,13 +1087,19 @@ func (c *Controller) check(ctx context.Context, p *Profile) healthResult {
 	if err := c.socksHandshake(ctx, session.SOCKSAddr()); err != nil {
 		return healthResult{Reason: classifyHealthError(err), Latency: time.Since(started), Revision: revision}
 	}
-	result := healthResult{TransportOK: true, Reason: "https_check_failed", Revision: revision}
-	successes := 0
-	var lastReason string
 	transport := &http.Transport{DialContext: func(x context.Context, n, a string) (net.Conn, error) {
 		return c.socksDialAt(x, session.SOCKSAddr(), a)
 	}, TLSHandshakeTimeout: c.settings.Failover.TLSHandshakeTimeout, ResponseHeaderTimeout: c.settings.Failover.CheckTimeout, DisableKeepAlives: true}
+	result := c.checkEndpoints(ctx, started, revision, transport)
 	defer transport.CloseIdleConnections()
+	return result
+}
+
+func (c *Controller) checkEndpoints(ctx context.Context, started time.Time, revision uint64, transport *http.Transport) healthResult {
+	result := healthResult{TransportOK: true, Reason: "https_check_failed", Revision: revision}
+	successes := 0
+	serviceSuccesses := 0
+	var lastReason string
 	client := http.Client{Transport: transport, Timeout: c.settings.Failover.CheckTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	for _, endpoint := range c.settings.Health.URLs {
 		if err := ctx.Err(); err != nil {
@@ -1048,22 +1128,23 @@ func (c *Controller) check(ctx context.Context, p *Profile) healthResult {
 		// worked. Application errors (403/429/5xx) are not VPN transport failures.
 		if healthHTTPStatusReachable(status) {
 			successes++
+			if healthHTTPStatusServes(status) {
+				serviceSuccesses++
+			}
 		} else {
 			lastReason = fmt.Sprintf("http_%d", status)
 		}
-		if successes >= c.settings.Health.RequiredSuccesses {
-			result.Healthy = true
-			result.Reason = ""
-			break
-		}
 	}
-	if !result.Healthy && lastReason != "" {
+	result.Healthy = successes >= c.settings.Health.RequiredSuccesses
+	result.ServiceOK = serviceSuccesses > 0
+	if result.Healthy {
+		result.Reason = ""
+	} else if lastReason != "" {
 		result.Reason = lastReason
 	}
 	result.Latency = time.Since(started)
 	return result
 }
-
 func (c *Controller) checkURL(ctx context.Context, p *Profile, rawURL string) map[string]any {
 	parsedURL, _ := url.Parse(rawURL)
 	host := ""
@@ -1203,6 +1284,8 @@ func diagnosticResult(trace NetworkTrace, healthy bool) map[string]any {
 
 func healthHTTPStatusReachable(status int) bool { return status >= 100 && status <= 599 }
 
+func healthHTTPStatusServes(status int) bool { return status >= 200 && status < 400 }
+
 func classifyHealthError(err error) string {
 	if err == nil {
 		return "none"
@@ -1322,28 +1405,18 @@ func (c *Controller) monitor(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		active := c.active.Load()
 		sem := make(chan struct{}, c.maxEngines)
 		var checks sync.WaitGroup
 		for _, p := range c.profilesSnapshot() {
 			p.mu.Lock()
 			_, running := p.session, p.session != nil && p.enabled
-			lastCheck := p.LastCheck
 			p.mu.Unlock()
 			if !running {
 				continue
 			}
-			if active != nil {
-				active.mu.Lock()
-				activePriority := active.Priority
-				active.mu.Unlock()
-				p.mu.Lock()
-				priority := p.Priority
-				p.mu.Unlock()
-				if priority < activePriority && time.Since(lastCheck) < c.settings.Failover.RecoveryInterval {
-					continue
-				}
-			}
+			// Probe every enabled, running profile each interval, including the
+			// preferred profile while a backup is active. Recovery still requires
+			// RecoveryThreshold consecutive successful checks.
 			checks.Add(1)
 			go func(profile *Profile) {
 				defer checks.Done()
@@ -1375,16 +1448,23 @@ func (c *Controller) recordHealth(p *Profile, result healthResult) {
 		return
 	}
 	wasHealthy := p.Healthy
+	wasState := p.State
 	p.LastCheck = time.Now()
 	if result.ExternalIP != "" {
 		p.ExternalIP = result.ExternalIP
 	}
 	p.HealthLatencyMS = result.Latency.Milliseconds()
+	p.ConnectivityOK = result.TransportOK && result.Healthy
+	p.ServiceHealthy = result.ServiceOK
 	if result.Healthy {
 		p.Successes++
 		p.Failures = 0
+		p.passiveFailures = 0
 		p.LastSuccess = p.LastCheck
 		if p.Successes >= c.settings.Failover.RecoveryThreshold || p.Healthy {
+			if !p.Healthy {
+				p.healthySince = p.LastCheck
+			}
 			p.Healthy = true
 			p.State = "HEALTHY"
 			p.LastError = ""
@@ -1396,6 +1476,7 @@ func (c *Controller) recordHealth(p *Profile, result healthResult) {
 		p.Successes = 0
 		if p.Failures >= c.settings.Failover.FailureThreshold {
 			p.Healthy = false
+			p.healthySince = time.Time{}
 			p.State = "UNHEALTHY"
 			p.LastError = result.Reason
 		} else if p.Healthy {
@@ -1410,14 +1491,120 @@ func (c *Controller) recordHealth(p *Profile, result healthResult) {
 			}
 		}
 	}
+	sample := HealthSample{At: p.LastCheck.UTC(), Profile: p.ID, ConnectivityOK: result.TransportOK && result.Healthy, ServiceOK: result.ServiceOK, Reason: result.Reason}
 	p.mu.Unlock()
-	if !result.Healthy && !wasHealthy {
+	c.recordHealthSample(sample)
+	if !result.Healthy && p.State == "UNHEALTHY" && wasState != "UNHEALTHY" {
 		c.appendEvent(ControllerEvent{At: time.Now().UTC(), Kind: "profile_error", Profile: p.ID, Message: result.Reason})
+	} else if result.Healthy && !wasHealthy {
+		c.appendEvent(ControllerEvent{At: time.Now().UTC(), Kind: "profile_recovered", Profile: p.ID, Message: "independent HTTPS checks recovered"})
 	}
 	// Evaluate failover as soon as this profile's check completes. Do not wait
 	// for slower checks of unrelated profiles if a healthy backup is already known.
 	c.selectProfile()
 }
+
+func (c *Controller) rebuildHealthStats() {
+	c.healthMu.Lock()
+	history := append([]HealthSample(nil), c.healthHistory...)
+	c.healthMu.Unlock()
+	now := time.Now()
+	for _, p := range c.profilesSnapshot() {
+		var conn24, conn7, svc24, svc7, n24, n7 int
+		for _, sample := range history {
+			if sample.Profile != p.ID {
+				continue
+			}
+			if sample.At.After(now.Add(-24 * time.Hour)) {
+				n24++
+				if sample.ConnectivityOK {
+					conn24++
+				}
+				if sample.ServiceOK {
+					svc24++
+				}
+			}
+			if sample.At.After(now.Add(-7 * 24 * time.Hour)) {
+				n7++
+				if sample.ConnectivityOK {
+					conn7++
+				}
+				if sample.ServiceOK {
+					svc7++
+				}
+			}
+		}
+		p.mu.Lock()
+		if n24 > 0 {
+			p.Availability24H = 100 * float64(conn24) / float64(n24)
+			p.Service24H = 100 * float64(svc24) / float64(n24)
+		}
+		if n7 > 0 {
+			p.Availability7D = 100 * float64(conn7) / float64(n7)
+			p.Service7D = 100 * float64(svc7) / float64(n7)
+		}
+		p.mu.Unlock()
+	}
+}
+
+func (c *Controller) recordHealthSample(sample HealthSample) {
+	now := sample.At
+	cutoff := now.Add(-7 * 24 * time.Hour)
+	c.healthMu.Lock()
+	kept := c.healthHistory[:0]
+	for _, existing := range c.healthHistory {
+		if existing.At.After(cutoff) {
+			kept = append(kept, existing)
+		}
+	}
+	c.healthHistory = append(kept, sample)
+	if len(c.healthHistory) > 100000 {
+		c.healthHistory = append([]HealthSample(nil), c.healthHistory[len(c.healthHistory)-100000:]...)
+	}
+	history := append([]HealthSample(nil), c.healthHistory...)
+	c.healthMu.Unlock()
+	var conn24, conn7, svc24, svc7, n24, n7 int
+	for _, item := range history {
+		if item.Profile != sample.Profile {
+			continue
+		}
+		if item.At.After(now.Add(-24 * time.Hour)) {
+			n24++
+			if item.ConnectivityOK {
+				conn24++
+			}
+			if item.ServiceOK {
+				svc24++
+			}
+		}
+		if item.At.After(cutoff) {
+			n7++
+			if item.ConnectivityOK {
+				conn7++
+			}
+			if item.ServiceOK {
+				svc7++
+			}
+		}
+	}
+	p := c.findProfile(sample.Profile)
+	if p != nil {
+		p.mu.Lock()
+		if n24 > 0 {
+			p.Availability24H = 100 * float64(conn24) / float64(n24)
+			p.Service24H = 100 * float64(svc24) / float64(n24)
+		}
+		if n7 > 0 {
+			p.Availability7D = 100 * float64(conn7) / float64(n7)
+			p.Service7D = 100 * float64(svc7) / float64(n7)
+		}
+		p.mu.Unlock()
+	}
+	if c.onEvent != nil {
+		c.onEvent()
+	}
+}
+
 func (c *Controller) selectProfile() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1457,12 +1644,31 @@ func (c *Controller) selectProfile() {
 	if candidate == old {
 		return
 	}
+	oldHealthy, oldReason := false, ""
+	// Returning to a higher-priority profile requires a stable recovery window,
+	// in addition to consecutive successful probes. Emergency failover is never delayed.
+	if old != nil && candidate != nil {
+		old.mu.Lock()
+		oldPriority := old.Priority
+		oldHealthy = old.Healthy
+		old.mu.Unlock()
+		candidate.mu.Lock()
+		candidatePriority, recoveredAt := candidate.Priority, candidate.healthySince
+		candidate.mu.Unlock()
+		if oldHealthy && candidatePriority < oldPriority && !recoveredAt.IsZero() && time.Since(recoveredAt) < c.settings.Failover.RecoveryInterval {
+			candidate = old
+		}
+	}
+	if candidate == old {
+		return
+	}
 	if !c.settings.Failover.Enabled && old != nil {
 		return
 	}
 	if old != nil {
 		old.mu.Lock()
-		oldHealthy := old.Healthy
+		oldHealthy = old.Healthy
+		oldReason = old.LastError
 		old.mu.Unlock()
 		// Never allow cooldown to postpone an emergency failover from an unhealthy active route.
 		if oldHealthy && candidate != nil && time.Since(c.lastSwitch) < c.settings.Failover.SwitchCooldown {
@@ -1480,6 +1686,9 @@ func (c *Controller) selectProfile() {
 		to = candidate.Name
 	}
 	message := from + " → " + to
+	if old != nil && !oldHealthy && oldReason != "" {
+		message += "; confirmed connectivity failure: " + oldReason
+	}
 	if candidate == nil {
 		var states []string
 		for _, p := range profiles {
@@ -1520,7 +1729,7 @@ func (c *Controller) snapshot() Snapshot {
 	profiles := make([]*Profile, 0, len(c.profilesSnapshot()))
 	for _, p := range c.profilesSnapshot() {
 		p.mu.Lock()
-		copy := &Profile{Name: p.Name, ID: p.ID, Priority: p.Priority, State: p.State, Healthy: p.Healthy, LastError: p.LastError, LastCheck: p.LastCheck, LastSuccess: p.LastSuccess, HealthLatencyMS: p.HealthLatencyMS, ExternalIP: p.ExternalIP, Failures: p.Failures, Successes: p.Successes, Restarts: p.Restarts}
+		copy := &Profile{Name: p.Name, ID: p.ID, Priority: p.Priority, State: p.State, Healthy: p.Healthy, ServiceHealthy: p.ServiceHealthy, ConnectivityOK: p.ConnectivityOK, Availability24H: p.Availability24H, Availability7D: p.Availability7D, Service24H: p.Service24H, Service7D: p.Service7D, LastError: p.LastError, LastCheck: p.LastCheck, LastSuccess: p.LastSuccess, HealthLatencyMS: p.HealthLatencyMS, ExternalIP: p.ExternalIP, Failures: p.Failures, Successes: p.Successes, Restarts: p.Restarts}
 		p.mu.Unlock()
 		profiles = append(profiles, copy)
 	}
@@ -1530,7 +1739,7 @@ func (c *Controller) snapshot() Snapshot {
 	c.mu.Lock()
 	manualUntil := c.manualUntil
 	c.mu.Unlock()
-	return Snapshot{Active: activeID, Profiles: profiles, Since: c.started, Switches: c.switches.Load(), LastSwitch: lastSwitch, ManualUntil: manualUntil, ActiveConnections: c.activeConnections.Load(), Events: events}
+	return Snapshot{Active: activeID, Profiles: profiles, Since: c.started, Switches: c.switches.Load(), LastSwitch: lastSwitch, ManualUntil: manualUntil, ActiveConnections: c.activeConnections.Load(), MinimumHealthyProfiles: c.settings.Health.MinimumHealthyProfiles, FailureDomainNote: "Multiple WARP profiles may share Cloudflare infrastructure and are not independent protection against provider-wide blocking.", Events: events}
 }
 func (c *Controller) proxyHandler() http.Handler {
 	if c.requests == nil {
@@ -1562,7 +1771,11 @@ func (c *Controller) proxyHandler() http.Handler {
 				trace.setDeadline("proxy_connect", deadline)
 			}
 			started := time.Now()
-			conn, e := c.dialActive(connectCtx, "tcp", r.Host)
+			passiveProfile := c.active.Load()
+			conn, e := c.dialProfile(connectCtx, passiveProfile, r.Host)
+			if e != nil {
+				c.noteProxyFailure(passiveProfile, e)
+			}
 			cancelConnect()
 			if trace != nil {
 				if e != nil {
@@ -1624,6 +1837,7 @@ func (c *Controller) proxyHandler() http.Handler {
 		out.Header.Del("Proxy-Connection")
 		resp, e := tr.RoundTrip(out)
 		if e != nil {
+			c.noteProxyFailure(p, e)
 			http.Error(w, "VPN transport failed: "+classifyHealthError(e), http.StatusBadGateway)
 			return
 		}
@@ -1801,6 +2015,12 @@ func main() {
 		slog.Error("event history", "error", err)
 	} else {
 		c.events = events
+	}
+	if history, err := loadHealthHistory(dataDir); err != nil {
+		slog.Error("health history", "error", err)
+	} else {
+		c.healthHistory = history
+		c.rebuildHealthStats()
 	}
 	c.onEvent = func() {
 		if err := admin.persistState(); err != nil {

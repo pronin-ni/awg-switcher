@@ -776,11 +776,15 @@ func (s *webServer) persistState() error {
 	s.controller.eventsMu.Lock()
 	events := append([]ControllerEvent(nil), s.controller.events...)
 	s.controller.eventsMu.Unlock()
+	s.controller.healthMu.Lock()
+	health := append([]HealthSample(nil), s.controller.healthHistory...)
+	s.controller.healthMu.Unlock()
 	data, err := json.Marshal(struct {
 		Profiles map[string]profileState `json:"profiles"`
 		Events   []ControllerEvent       `json:"events"`
+		Health   []HealthSample          `json:"health_history,omitempty"`
 		Updated  time.Time               `json:"updated"`
-	}{items, events, time.Now().UTC()})
+	}{items, events, health, time.Now().UTC()})
 	if err != nil {
 		return err
 	}
@@ -873,29 +877,70 @@ func loadStateEvents(dir string) ([]ControllerEvent, error) {
 	return state.Events, nil
 }
 
+func loadHealthHistory(dir string) ([]HealthSample, error) {
+	path := filepath.Join(dir, "state.db")
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return nil, errors.New("profile state file permissions are unsafe")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var state struct {
+		Health []HealthSample `json:"health_history"`
+	}
+	if json.Unmarshal(b, &state) != nil {
+		return nil, errors.New("profile state database is invalid")
+	}
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	history := state.Health[:0]
+	for _, sample := range state.Health {
+		if sample.At.After(cutoff) {
+			history = append(history, sample)
+		}
+	}
+	if len(history) > 100000 {
+		history = history[len(history)-100000:]
+	}
+	return history, nil
+}
+
 type profilePublic struct {
-	Name        string    `json:"name"`
-	ID          string    `json:"id"`
-	Priority    int       `json:"priority"`
-	State       string    `json:"state"`
-	Healthy     bool      `json:"healthy"`
-	LastError   string    `json:"last_error,omitempty"`
-	LastCheck   time.Time `json:"last_check,omitempty"`
-	LastSuccess time.Time `json:"last_success,omitempty"`
-	LatencyMS   int64     `json:"latency_ms"`
-	Restarts    int       `json:"restarts"`
-	Source      string    `json:"source"`
-	Endpoint    string    `json:"endpoint,omitempty"`
-	MTU         string    `json:"mtu,omitempty"`
-	Addresses   []string  `json:"addresses,omitempty"`
-	ExternalIP  string    `json:"external_ip,omitempty"`
-	Protocol    string    `json:"protocol"`
+	Name                string    `json:"name"`
+	ID                  string    `json:"id"`
+	Priority            int       `json:"priority"`
+	State               string    `json:"state"`
+	Healthy             bool      `json:"healthy"`
+	ConnectivityHealthy bool      `json:"connectivity_healthy"`
+	ServiceHealthy      bool      `json:"service_healthy"`
+	Availability24H     float64   `json:"availability_24h"`
+	Availability7D      float64   `json:"availability_7d"`
+	ServiceHealth24H    float64   `json:"service_health_24h"`
+	ServiceHealth7D     float64   `json:"service_health_7d"`
+	LastError           string    `json:"last_error,omitempty"`
+	LastCheck           time.Time `json:"last_check,omitempty"`
+	LastSuccess         time.Time `json:"last_success,omitempty"`
+	LatencyMS           int64     `json:"latency_ms"`
+	Restarts            int       `json:"restarts"`
+	Source              string    `json:"source"`
+	Endpoint            string    `json:"endpoint,omitempty"`
+	MTU                 string    `json:"mtu,omitempty"`
+	Addresses           []string  `json:"addresses,omitempty"`
+	ExternalIP          string    `json:"external_ip,omitempty"`
+	Protocol            string    `json:"protocol"`
 }
 
 func profileView(p *Profile) profilePublic {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	v := profilePublic{Name: p.Name, ID: p.ID, Priority: p.Priority, State: p.State, Healthy: p.Healthy, LastError: p.LastError, LastCheck: p.LastCheck, LastSuccess: p.LastSuccess, LatencyMS: p.HealthLatencyMS, Restarts: p.Restarts, Source: "filesystem", ExternalIP: p.ExternalIP, Protocol: "WireGuard"}
+	v := profilePublic{Name: p.Name, ID: p.ID, Priority: p.Priority, State: p.State, Healthy: p.Healthy, ConnectivityHealthy: p.ConnectivityOK, ServiceHealthy: p.ServiceHealthy, Availability24H: p.Availability24H, Availability7D: p.Availability7D, ServiceHealth24H: p.Service24H, ServiceHealth7D: p.Service7D, LastError: p.LastError, LastCheck: p.LastCheck, LastSuccess: p.LastSuccess, LatencyMS: p.HealthLatencyMS, Restarts: p.Restarts, Source: "filesystem", ExternalIP: p.ExternalIP, Protocol: "WireGuard"}
 	if strings.Contains(p.path, "/data/profiles/") {
 		v.Source = "imported"
 	}

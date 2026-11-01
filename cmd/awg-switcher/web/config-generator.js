@@ -62,6 +62,7 @@
     $('#warp-generator-dialog').showModal();
     if (!settingsLoaded) loadSettings();
   });
+  $('#reserve-generate').addEventListener('click', () => $('#generate-warp-open').click());
   $('#generator-close').addEventListener('click', () => $('#warp-generator-dialog').close());
 
   $('#generator-save').addEventListener('click', async () => {

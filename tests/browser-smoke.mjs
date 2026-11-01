@@ -51,6 +51,8 @@ try {
   await page.locator('#dashboard').waitFor({ state: 'visible' });
 
   await page.locator('.rail nav a[href="#profiles"]').click();
+  await page.locator('#reserve-warning').waitFor({ state: 'visible' });
+  await page.locator('#reserve-generate').waitFor({ state: 'visible' });
   await page.getByRole('button', { name: '＋ Сгенерировать WARP' }).waitFor();
   await page.locator('#generate-warp-open').click();
   await page.locator('#warp-generator-dialog').waitFor({ state: 'visible' });
@@ -76,7 +78,7 @@ try {
     const rows = [...document.querySelectorAll('#profile-list .profile-row')];
     return rows.length === 2 && rows[0].querySelector('.profile-name')?.textContent === 'backup';
   });
-  const beforeRestart = await page.locator('#profile-list .profile-row .profile-sub').allTextContents();
+  const beforeRestart = await page.locator('#profile-list .profile-row').evaluateAll((rows) => rows.map((row) => row.querySelector('.profile-sub').textContent));
   if (!beforeRestart[0].includes('Приоритет 0') || !beforeRestart[1].includes('Приоритет 1')) {
     throw new Error(`unexpected priorities before restart: ${beforeRestart.join(' | ')}`);
   }
@@ -99,7 +101,7 @@ try {
   if (restoredNames[0] !== 'backup' || restoredNames[1] !== 'primary') {
     throw new Error(`profile order changed on restart: ${restoredNames.join(' | ')}`);
   }
-  const afterRestart = await page.locator('#profile-list .profile-row .profile-sub').allTextContents();
+  const afterRestart = await page.locator('#profile-list .profile-row').evaluateAll((rows) => rows.map((row) => row.querySelector('.profile-sub').textContent));
   if (!afterRestart[0].includes('Приоритет 0') || !afterRestart[1].includes('Приоритет 1')) {
     throw new Error(`priorities changed after restart: ${afterRestart.join(' | ')}`);
   }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -371,6 +372,87 @@ func TestHTTPSConnectUsesSelectedSOCKSRoute(t *testing.T) {
 		}
 	default:
 		t.Fatal("CONNECT did not use SOCKS")
+	}
+}
+
+func TestHealthEndpointsSeparateVPNConnectivityFromServiceFailures(t *testing.T) {
+	origin := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/service-down" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if r.URL.Path == "/forbidden" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer origin.Close()
+	socks := newTestSocks(t, strings.TrimPrefix(origin.URL, "https://"))
+	parsed, err := url.Parse(origin.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(origin.Certificate())
+	c := testController(t, socks.Addr())
+	c.settings.Health.URLs = []string{origin.URL + "/forbidden", origin.URL + "/ok"}
+	c.settings.Health.RequiredSuccesses = 1
+	transport := &http.Transport{DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+		return c.socksDialAt(ctx, socks.Addr(), address)
+	}, TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: parsed.Hostname()}, DisableKeepAlives: true}
+	result := c.checkEndpoints(context.Background(), time.Now(), 0, transport)
+	transport.CloseIdleConnections()
+	if !result.Healthy || !result.TransportOK || !result.ServiceOK {
+		t.Fatalf("a single 403 hid the independent successful service endpoint: %+v", result)
+	}
+	c.settings.Health.URLs = []string{origin.URL + "/forbidden", origin.URL + "/service-down"}
+	transport = &http.Transport{DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+		return c.socksDialAt(ctx, socks.Addr(), address)
+	}, TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: parsed.Hostname()}, DisableKeepAlives: true}
+	result = c.checkEndpoints(context.Background(), time.Now(), 0, transport)
+	transport.CloseIdleConnections()
+	if !result.Healthy || !result.TransportOK || result.ServiceOK {
+		t.Fatalf("HTTP application errors should indicate reachable VPN but unhealthy control services: %+v", result)
+	}
+}
+
+func TestPassiveMassProxyFailuresNeedConfirmationAndRouteRecovers(t *testing.T) {
+	origin := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	defer origin.Close()
+	socks := newTestSocks(t, strings.TrimPrefix(origin.URL, "https://"))
+	socks.available.Store(false)
+	p := &Profile{ID: "active", Name: "active", Priority: 0, Healthy: true, State: "HEALTHY", enabled: true, session: &testSession{addr: socks.Addr()}, restartReq: make(chan struct{}, 1)}
+	s := Settings{}
+	s.Failover.Enabled = true
+	s.Failover.CheckTimeout = time.Second
+	s.Failover.TLSHandshakeTimeout = time.Second
+	s.Failover.FailureThreshold = 1
+	s.Failover.RecoveryThreshold = 2
+	s.Health.RequiredSuccesses = 1
+	s.Health.URLs = []string{origin.URL}
+	c := &Controller{profiles: []*Profile{p}, settings: s}
+	c.active.Store(p)
+	c.noteProxyFailure(p, &SOCKSError{Stage: "socks5_connect", Err: errors.New("connect timeout")})
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		p.mu.Lock()
+		unhealthy := p.State == "UNHEALTHY"
+		p.mu.Unlock()
+		if unhealthy {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if c.active.Load() != nil {
+		t.Fatal("confirmed failure did not fail closed with no healthy route")
+	}
+	socks.available.Store(true)
+	for i := 0; i < 2; i++ {
+		c.recordHealth(p, healthResult{Healthy: true, TransportOK: true, ServiceOK: true})
+	}
+	if c.active.Load() != p {
+		t.Fatal("profile did not safely recover after consecutive independent HTTPS probes")
 	}
 }
 

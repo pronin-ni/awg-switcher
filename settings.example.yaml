@@ -13,6 +13,7 @@ profiles:
 failover:
   enabled: true
   check_interval: 15s
+  # Each enabled, running profile is probed at this interval (not only the active route).
   check_timeout: 8s
   manual_check_timeout: 30s
   tls_handshake_timeout: 10s
@@ -26,3 +27,5 @@ health:
     - https://api.ipify.org
     - https://www.cloudflare.com/cdn-cgi/trace
   required_successes: 1
+  # Show a reserve warning when fewer than this many profiles pass connectivity checks.
+  minimum_healthy_profiles: 2

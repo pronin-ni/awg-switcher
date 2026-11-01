@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -331,6 +332,97 @@ func TestSelectProfileUsesPriorityAndAtomicActive(t *testing.T) {
 	c.selectProfile()
 	if got := c.active.Load(); got != backup {
 		t.Fatalf("active profile=%v, want backup", got)
+	}
+}
+
+func TestConnectivityAndServiceHealthAreIndependent(t *testing.T) {
+	for _, status := range []int{http.StatusForbidden, http.StatusTooManyRequests, http.StatusInternalServerError} {
+		if !healthHTTPStatusReachable(status) {
+			t.Errorf("HTTP %d should prove that TLS/network path is reachable", status)
+		}
+		if healthHTTPStatusServes(status) {
+			t.Errorf("HTTP %d should not count as healthy service response", status)
+		}
+	}
+	for _, status := range []int{http.StatusOK, http.StatusNoContent, http.StatusTemporaryRedirect} {
+		if !healthHTTPStatusServes(status) {
+			t.Errorf("HTTP %d should count as a service response", status)
+		}
+	}
+}
+
+func TestHealthThresholdsProtectAgainstTransientFailureAndConfirmRecovery(t *testing.T) {
+	s := Settings{}
+	s.Failover.Enabled = true
+	s.Failover.FailureThreshold = 2
+	s.Failover.RecoveryThreshold = 2
+	s.Failover.RecoveryInterval = time.Minute
+	primary := &Profile{ID: "primary", Name: "primary", Priority: 0, Healthy: true, enabled: true, State: "HEALTHY"}
+	backup := &Profile{ID: "backup", Name: "backup", Priority: 1, Healthy: true, enabled: true, State: "HEALTHY"}
+	c := &Controller{settings: s, profiles: []*Profile{primary, backup}}
+	c.active.Store(primary)
+	failed := healthResult{TransportOK: false, Reason: "timeout"}
+	c.recordHealth(primary, failed)
+	if c.active.Load() != primary || !primary.Healthy {
+		t.Fatal("single transient failure caused failover")
+	}
+	c.recordHealth(primary, failed)
+	if c.active.Load() != backup || primary.Healthy {
+		t.Fatal("confirmed active failure did not fail over")
+	}
+	c.recordHealth(primary, healthResult{Healthy: true, TransportOK: true})
+	if c.active.Load() != backup || primary.Healthy {
+		t.Fatal("single recovery probe prematurely reactivated primary")
+	}
+	c.recordHealth(primary, healthResult{Healthy: true, TransportOK: true})
+	if !primary.Healthy {
+		t.Fatal("primary did not recover after consecutive successes")
+	}
+	if c.active.Load() != backup {
+		t.Fatal("primary returned before the recovery stability window")
+	}
+	if got := c.switches.Load(); got != 1 {
+		t.Fatalf("recovery hold caused spurious route changes: switches=%d want 1", got)
+	}
+	primary.mu.Lock()
+	primary.healthySince = time.Now().Add(-2 * time.Minute)
+	primary.mu.Unlock()
+	c.selectProfile()
+	if c.active.Load() != primary {
+		t.Fatal("stable recovered primary was not restored")
+	}
+	if got := c.switches.Load(); got != 2 {
+		t.Fatalf("unexpected switch count after recovery: %d", got)
+	}
+}
+
+func TestPassiveProxyErrorsRequireActiveConfirmation(t *testing.T) {
+	s := Settings{}
+	s.Failover.FailureThreshold = 3
+	p := &Profile{ID: "active", Healthy: true, State: "HEALTHY"}
+	c := &Controller{settings: s}
+	c.noteProxyFailure(p, &SOCKSError{Stage: "connect", Err: errors.New("refused")})
+	c.noteProxyFailure(p, &SOCKSError{Stage: "connect", Err: errors.New("timeout")})
+	if !p.Healthy || p.Failures != 0 {
+		t.Fatal("passive observations directly changed health before active confirmation")
+	}
+	c.noteProxyFailure(p, errors.New("application HTTP 403"))
+	if p.passiveFailures != 2 {
+		t.Fatalf("non-transport application error affected passive counter: %d", p.passiveFailures)
+	}
+}
+
+func TestBackupFailureDoesNotDisplaceHealthyActiveProfile(t *testing.T) {
+	s := Settings{}
+	s.Failover.Enabled = true
+	s.Failover.FailureThreshold = 1
+	active := &Profile{ID: "active", Priority: 0, Healthy: true, enabled: true}
+	backup := &Profile{ID: "backup", Priority: 1, Healthy: true, enabled: true}
+	c := &Controller{settings: s, profiles: []*Profile{active, backup}}
+	c.active.Store(active)
+	c.recordHealth(backup, healthResult{TransportOK: false, Reason: "timeout"})
+	if c.active.Load() != active {
+		t.Fatal("failure of a standby profile switched away from active route")
 	}
 }
 

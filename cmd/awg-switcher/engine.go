@@ -220,12 +220,16 @@ func (c *Controller) supervise(ctx context.Context, p *Profile, slot int) {
 			p.session = nil
 			p.State = "DISABLED"
 			p.Healthy = false
+			p.ConnectivityOK = false
+			p.ServiceHealthy = false
 			p.mu.Unlock()
 			return
 		case <-session.Done():
 			p.mu.Lock()
 			p.session = nil
 			p.Healthy = false
+			p.ConnectivityOK = false
+			p.ServiceHealthy = false
 			p.Successes = 0
 			p.Failures = c.settings.Failover.FailureThreshold
 			p.State = "UNHEALTHY"
@@ -252,6 +256,8 @@ func (c *Controller) supervise(ctx context.Context, p *Profile, slot int) {
 			p.mu.Lock()
 			p.session = nil
 			p.Healthy = false
+			p.ConnectivityOK = false
+			p.ServiceHealthy = false
 			p.State = "COOLDOWN"
 			p.Restarts++
 			delay, history := retryDelay(time.Now(), p.restartTimes)

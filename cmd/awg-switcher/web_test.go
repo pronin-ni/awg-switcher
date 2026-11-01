@@ -93,6 +93,7 @@ func TestWebFirstRunSetupConsumesOneTimeToken(t *testing.T) {
 func TestProfileMetadataPersistsWithoutConfigSecrets(t *testing.T) {
 	dir := t.TempDir()
 	c := &Controller{profiles: []*Profile{{ID: "opaque-id", Name: "renamed", Priority: 2, enabled: true, config: []byte(validWG)}}}
+	c.healthHistory = []HealthSample{{At: time.Now().UTC(), Profile: "opaque-id", ConnectivityOK: true, ServiceOK: false, Reason: "HTTP 403"}}
 	c.appendEvent(ControllerEvent{At: time.Now().UTC(), Kind: "switch", Profile: "opaque-id", Message: "primary → backup"})
 	web := &webServer{controller: c, dataDir: dir}
 	if err := web.persistState(); err != nil {
@@ -118,6 +119,15 @@ func TestProfileMetadataPersistsWithoutConfigSecrets(t *testing.T) {
 	events, err := loadStateEvents(dir)
 	if err != nil || len(events) != 1 || events[0].Kind != "switch" {
 		t.Fatalf("event history not restored: events=%+v err=%v", events, err)
+	}
+	history, err := loadHealthHistory(dir)
+	if err != nil || len(history) != 1 || !history[0].ConnectivityOK || history[0].ServiceOK {
+		t.Fatalf("health history not restored independently: history=%+v err=%v", history, err)
+	}
+	c.healthHistory = history
+	c.rebuildHealthStats()
+	if got := c.snapshot().Profiles[0]; got.Availability24H != 100 || got.Service24H != 0 || got.Availability7D != 100 {
+		t.Fatalf("availability metrics were not rebuilt from persisted samples: %+v", got)
 	}
 }
 
@@ -242,7 +252,8 @@ func TestClassifySOCKSReplyCodesSeparately(t *testing.T) {
 
 func TestDiagnosticResponseOmitsURLPathAndQuery(t *testing.T) {
 	c := &Controller{}
-	p := &Profile{ID: "test-profile"}
+	p := &Profile{ID: "test-profile", Healthy: true, State: "HEALTHY", Failures: 1, Successes: 2, LastError: "unchanged"}
+	c.active.Store(p)
 	result := c.checkURL(context.Background(), p, "https://example.test/private/path?access_token=synthetic-token")
 	if _, ok := result["url"]; ok {
 		t.Fatal("diagnostic response echoes full URL")
@@ -256,6 +267,9 @@ func TestDiagnosticResponseOmitsURLPathAndQuery(t *testing.T) {
 	encoded, _ := json.Marshal(result)
 	if bytes.Contains(encoded, []byte("synthetic-token")) || bytes.Contains(encoded, []byte("private/path")) {
 		t.Fatal("diagnostic response contains URL path/query data")
+	}
+	if !p.Healthy || p.State != "HEALTHY" || p.Failures != 1 || p.Successes != 2 || p.LastError != "unchanged" || c.active.Load() != p {
+		t.Fatal("read-only diagnostic changed health state or global route")
 	}
 }
 
