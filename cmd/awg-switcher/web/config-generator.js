@@ -3,7 +3,6 @@
 
   const $ = (selector) => document.querySelector(selector);
   let csrf = '';
-  let eligibleIDs = [];
 
   async function api(path, options = {}) {
     const headers = new Headers(options.headers || {});
@@ -16,7 +15,7 @@
       }
       headers.set('X-CSRF-Token', csrf);
     }
-    const response = await fetch(path, { ...options, headers });
+    const response = await fetch(path, { ...options, headers, cache: 'no-store' });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
       const retry = response.headers.get('Retry-After');
@@ -26,17 +25,42 @@
     return data;
   }
 
-  async function loadSettings() {
-    try {
-      const settings = await api('/api/config-generator/settings');
-      $('#generator-url').value = settings.url;
-      $('#generator-settings-status').textContent = settings.token_configured
-        ? 'Сохранён Bearer-токен. Endpoint mode: hostname; Lab Auto отключён.'
-        : 'Токен не сохранён. Endpoint mode: hostname; Lab Auto отключён.';
-    } catch (error) {
-      $('#generator-settings-status').textContent = error.message;
+  function showOutcome(result) {
+    const root = $('#generator-result');
+    root.replaceChildren();
+    const summary = document.createElement('p');
+    summary.className = 'muted';
+    summary.textContent = result.message || 'Проверка завершена.';
+    root.append(summary);
+    for (const profile of result.profiles || []) {
+      const row = document.createElement('div');
+      row.className = `generator-outcome ${profile.verified ? 'is-ok' : 'is-error'}`;
+      const title = document.createElement('strong');
+      title.textContent = profile.profile_name || `Профиль ${profile.index}`;
+      const detail = document.createElement('span');
+      if (profile.verified) {
+        detail.textContent = 'HTTPS-проверка пройдена · добавлен резервным профилем';
+      } else if (profile.saved) {
+        detail.textContent = `Сохранён, но оставлен выключенным: ${profile.failure_reason || 'проверка не пройдена'}`;
+      } else {
+        detail.textContent = `Не импортирован: ${profile.failure_reason || 'неизвестная ошибка'}`;
+      }
+      row.append(title, detail);
+      root.append(row);
+    }
+    if (result.generator_warning) {
+      const warning = document.createElement('p');
+      warning.className = 'small muted';
+      warning.textContent = `Предупреждение генератора: ${result.generator_warning}`;
+      root.append(warning);
     }
   }
+
+  $('#generate-warp-open').addEventListener('click', () => {
+    $('#generator-result').replaceChildren();
+    $('#warp-generator-dialog').showModal();
+  });
+  $('#generator-close').addEventListener('click', () => $('#warp-generator-dialog').close());
 
   $('#generator-save').addEventListener('click', async () => {
     const status = $('#generator-settings-status');
@@ -48,8 +72,8 @@
       $('#generator-token').value = '';
       $('#generator-clear-token').checked = false;
       status.textContent = result.token_configured
-        ? 'Настройки сохранены; Bearer-токен защищённо сохранён на сервере.'
-        : 'Настройки сохранены. Endpoint mode: hostname; Lab Auto отключён.';
+        ? 'Настройки сохранены; Bearer-токен защищённо хранится на сервере.'
+        : 'Настройки сохранены.';
     } catch (error) {
       status.textContent = `Не удалось сохранить настройки: ${error.message}`;
     }
@@ -57,7 +81,7 @@
 
   $('#generator-test').addEventListener('click', async () => {
     const status = $('#generator-settings-status');
-    status.textContent = 'Проверка /api/status…';
+    status.textContent = 'Проверка соединения…';
     try {
       const result = await api('/api/config-generator/test', { method: 'POST', body: '{}' });
       status.textContent = result.message;
@@ -66,48 +90,36 @@
     }
   });
 
-  $('#generate-warp').addEventListener('click', async () => {
+  $('#generate-warp').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
     const resultNode = $('#generator-result');
-    const actions = $('#generator-enable-actions');
-    actions.replaceChildren();
-    eligibleIDs = [];
-    resultNode.textContent = 'Запрос генерации и отдельная HTTPS-проверка каждого профиля могут занять до нескольких минут…';
+    button.disabled = true;
+    resultNode.textContent = 'Запрос к awgconfig.com, импорт и HTTPS-проверка каждого профиля. Это может занять до нескольких минут…';
     try {
       const result = await api('/api/config-generator/generate', {
         method: 'POST',
         body: JSON.stringify({ mode: $('#generator-mode').value, count: Number($('#generator-count').value) }),
       });
-      eligibleIDs = result.eligible_profile_ids || [];
-      resultNode.textContent = JSON.stringify(result, null, 2);
-      if (eligibleIDs.length) {
-        const button = document.createElement('button');
-        button.className = 'primary';
-        button.textContent = `Включить ${eligibleIDs.length} HTTPS-проверенных профилей в автоматический failover`;
-        button.addEventListener('click', async () => {
-          button.disabled = true;
-          try {
-            for (const id of eligibleIDs) {
-              await api(`/api/profiles/${encodeURIComponent(id)}`, {
-                method: 'PATCH', body: JSON.stringify({ enabled: true }),
-              });
-            }
-            button.textContent = 'Профили включены; основной профиль автоматически не менялся';
-            window.dispatchEvent(new Event('awg-profiles-updated'));
-          } catch (error) {
-            button.disabled = false;
-            button.textContent = `Не все профили включены: ${error.message}`;
-          }
-        });
-        actions.append(button);
-      }
+      showOutcome(result);
       window.dispatchEvent(new Event('awg-profiles-updated'));
     } catch (error) {
-      resultNode.textContent = `Генерация не выполнена: ${error.message}`;
+      resultNode.textContent = `Не удалось сгенерировать профили: ${error.message}`;
+    } finally {
+      button.disabled = false;
     }
   });
 
-  window.addEventListener('awg-profiles-updated', () => {
-    // The existing dashboard refreshes profile state every five seconds.
-  });
+  async function loadSettings() {
+    try {
+      const settings = await api('/api/config-generator/settings');
+      $('#generator-url').value = settings.url;
+      $('#generator-settings-status').textContent = settings.token_configured
+        ? 'Self-hosted Bearer-токен настроен.'
+        : 'Используется стандартный API awgconfig.com.';
+    } catch (error) {
+      $('#generator-settings-status').textContent = error.message;
+    }
+  }
+
   loadSettings();
 })();

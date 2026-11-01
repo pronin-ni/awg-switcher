@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	defaultGeneratorURL      = "http://awg-config-gen:3000"
+	defaultGeneratorURL      = "https://awgconfig.com"
 	maxGeneratorBody         = 5 << 20
 	generatorTimeout         = 65 * time.Second
 	generatorWorkflowTimeout = 3 * time.Minute
@@ -658,6 +658,12 @@ func (s *webServer) generateWarpProfilesHandler(w http.ResponseWriter, r *http.R
 		item.Verified = reason == ""
 		if item.Verified {
 			eligible = append(eligible, id)
+			profile.mu.Lock()
+			profile.enabled = true
+			profile.State = "CONNECTING"
+			profile.mu.Unlock()
+			s.controller.launchProfile(profile)
+			item.Enabled = true
 		} else {
 			item.FailureReason = reason
 			profile.mu.Lock()
@@ -674,7 +680,7 @@ func (s *webServer) generateWarpProfilesHandler(w http.ResponseWriter, r *http.R
 		"success": true, "mode": mode, "requested": req.Count, "generated": len(generation.Configs),
 		"endpoint_mode": "hostname", "allowed_ips": "0.0.0.0/0", "experimental_cps": false,
 		"profiles": results, "eligible_profile_ids": eligible,
-		"message": "New profiles remain disabled. Enable only HTTPS-verified profiles if you want them considered by automatic failover.",
+		"message": "HTTPS-verified profiles were enabled as backups. Existing active profile and priority were not changed; failed profiles remain disabled.",
 	}
 	if warning, ok := generation.Warning.(string); ok && len(warning) <= 512 {
 		response["generator_warning"] = warning

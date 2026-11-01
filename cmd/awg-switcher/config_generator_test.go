@@ -23,6 +23,7 @@ func TestNormalizeGeneratorURLRestrictsHTTPAndRemoteSchemes(t *testing.T) {
 		input, want string
 		fail        bool
 	}{
+		{"https://awgconfig.com", "https://awgconfig.com", false},
 		{"http://awg-config-gen:3000", "http://awg-config-gen:3000", false},
 		{"http://example.com", "", true},
 		{"http://127.0.0.1:3000", "", true},
@@ -108,6 +109,17 @@ func TestGeneratorSettingsProtectBearerTokenOnDisk(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(dir, "profiles")); !os.IsNotExist(err) {
 		t.Fatalf("unexpected profile storage: %v", err)
+	}
+}
+
+func TestFreshGeneratorSettingsUsePublicAWGConfigAPI(t *testing.T) {
+	s := &webServer{dataDir: t.TempDir()}
+	cfg, err := s.generatorSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.URL != "https://awgconfig.com" || cfg.BearerToken != "" {
+		t.Fatalf("unexpected fresh-install generator settings: url=%q token_configured=%t", cfg.URL, cfg.BearerToken != "")
 	}
 }
 

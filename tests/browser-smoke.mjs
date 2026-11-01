@@ -47,22 +47,20 @@ try {
   await page.locator('#password').fill(password);
   await page.locator('#login-form button').click();
   await page.locator('#dashboard').waitFor({ state: 'visible' });
-  await page.locator('a[href="#dashboard"]').click();
+  await page.locator('.rail nav a[href="#dashboard"]').click();
   await page.locator('#dashboard').waitFor({ state: 'visible' });
 
-  await page.locator('a[href="#profiles"]').click();
-  await page.locator('#generator-url').waitFor({ state: 'visible' });
-  if ((await page.locator('#generator-url').inputValue()) !== 'http://awg-config-gen:3000') {
-    throw new Error('optional generator did not default to the local Docker service');
+  await page.locator('.rail nav a[href="#profiles"]').click();
+  await page.getByRole('button', { name: '＋ Сгенерировать WARP' }).waitFor();
+  await page.locator('#generate-warp-open').click();
+  await page.locator('#warp-generator-dialog').waitFor({ state: 'visible' });
+  if ((await page.locator('#generator-url').inputValue()) !== 'https://awgconfig.com') {
+    throw new Error('standard generator did not default to awgconfig.com');
   }
   await page.locator('#generator-mode').selectOption('awg31');
   await page.locator('#generator-count').selectOption('3');
-  if (await page.locator('#generator-enable-actions button').count()) {
-    throw new Error('generator unexpectedly offered profile enablement before a verified generation');
-  }
-  await page.locator('#generator-test').click();
-  await page.locator('#generator-settings-status').getByText(/Генератор недоступен/).waitFor({ timeout: 15000 });
-  const input = page.locator('#files');
+  await page.locator('#generator-close').click();
+  const input = page.locator('#modal-files');
   await input.setInputFiles([
     { name: 'primary.conf', mimeType: 'text/plain', buffer: Buffer.from(config) },
     { name: 'backup.conf', mimeType: 'text/plain', buffer: Buffer.from(config.replace('172.16.0.2', '172.16.0.3')) },
@@ -95,7 +93,7 @@ try {
   await page.locator('#password').fill(password);
   await page.locator('#login-form button').click();
   await page.locator('#dashboard').waitFor({ state: 'visible' });
-  await page.locator('a[href="#profiles"]').click();
+  await page.locator('.rail nav a[href="#profiles"]').click();
   await page.locator('#profile-list .profile-row').nth(1).waitFor();
   const restoredNames = await page.locator('#profile-list .profile-row .profile-name').allTextContents();
   if (restoredNames[0] !== 'backup' || restoredNames[1] !== 'primary') {
@@ -114,7 +112,7 @@ try {
   await page.locator('#download-support').click();
   const report = await downloadPromise;
   if (report.suggestedFilename() !== 'awg-switcher-support.json') throw new Error('unexpected support report filename');
-  console.log('PASS: first-run setup, login, optional generator defaults/unavailable behavior, profile upload/order persistence, Network Debug toggle and support report download');
+  console.log('PASS: first-run setup, login, visible WARP generator action and modal, awgconfig.com default, profile upload/order persistence, Network Debug toggle and support report download');
 } finally {
   await browser?.close();
   try { docker('rm', '-f', name); } catch {}
