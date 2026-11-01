@@ -119,31 +119,33 @@ type ControllerEvent struct {
 	Message string    `json:"message"`
 }
 type Controller struct {
-	profiles          []*Profile
-	profilesMu        sync.RWMutex
-	dynamicMu         sync.Mutex
-	active            atomic.Pointer[Profile]
-	settings          Settings
-	started           time.Time
-	switches          atomic.Uint64
-	mu                sync.Mutex
-	lastSwitch        time.Time
-	engine            Engine
-	runtimeDir        string
-	maxEngines        int
-	requests          chan struct{}
-	wg                sync.WaitGroup
-	ctx               context.Context
-	manualUntil       time.Time
-	eventsMu          sync.Mutex
-	events            []ControllerEvent
-	onEvent           func()
-	activeConnections atomic.Int64
-	networkDebugMu    sync.Mutex
-	networkDebugUntil time.Time
-	networkTraces     []NetworkTrace
-	healthMu          sync.Mutex
-	healthHistory     []HealthSample
+	profiles           []*Profile
+	profilesMu         sync.RWMutex
+	dynamicMu          sync.Mutex
+	active             atomic.Pointer[Profile]
+	settings           Settings
+	started            time.Time
+	switches           atomic.Uint64
+	mu                 sync.Mutex
+	lastSwitch         time.Time
+	engine             Engine
+	runtimeDir         string
+	maxEngines         int
+	requests           chan struct{}
+	wg                 sync.WaitGroup
+	ctx                context.Context
+	manualUntil        time.Time
+	eventsMu           sync.Mutex
+	events             []ControllerEvent
+	onEvent            func()
+	activeConnections  atomic.Int64
+	networkDebugMu     sync.Mutex
+	networkDebugUntil  time.Time
+	networkTraces      []NetworkTrace
+	healthMu           sync.Mutex
+	healthHistory      []HealthSample
+	healthStatsUpdated map[string]time.Time
+	healthPrunedAt     time.Time
 }
 
 func defaults(s *Settings) {
@@ -1434,6 +1436,9 @@ func (c *Controller) monitor(ctx context.Context) {
 		}
 		checks.Wait()
 		c.selectProfile()
+		if c.onEvent != nil {
+			c.onEvent()
+		}
 	}
 }
 
@@ -1551,16 +1556,28 @@ func (c *Controller) recordHealthSample(sample HealthSample) {
 	now := sample.At
 	cutoff := now.Add(-7 * 24 * time.Hour)
 	c.healthMu.Lock()
-	kept := c.healthHistory[:0]
-	for _, existing := range c.healthHistory {
-		if existing.At.After(cutoff) {
-			kept = append(kept, existing)
+	if c.healthStatsUpdated == nil {
+		c.healthStatsUpdated = make(map[string]time.Time)
+	}
+	if c.healthPrunedAt.IsZero() || now.Sub(c.healthPrunedAt) >= time.Hour || len(c.healthHistory) >= 100000 {
+		kept := c.healthHistory[:0]
+		for _, existing := range c.healthHistory {
+			if existing.At.After(cutoff) {
+				kept = append(kept, existing)
+			}
 		}
+		c.healthHistory = kept
+		c.healthPrunedAt = now
 	}
-	c.healthHistory = append(kept, sample)
+	c.healthHistory = append(c.healthHistory, sample)
 	if len(c.healthHistory) > 100000 {
-		c.healthHistory = append([]HealthSample(nil), c.healthHistory[len(c.healthHistory)-100000:]...)
+		c.healthHistory = append([]HealthSample(nil), c.healthHistory[len(c.healthHistory)-90000:]...)
 	}
+	if updated := c.healthStatsUpdated[sample.Profile]; !updated.IsZero() && now.Sub(updated) < time.Minute {
+		c.healthMu.Unlock()
+		return
+	}
+	c.healthStatsUpdated[sample.Profile] = now
 	history := append([]HealthSample(nil), c.healthHistory...)
 	c.healthMu.Unlock()
 	var conn24, conn7, svc24, svc7, n24, n7 int
@@ -1599,9 +1616,6 @@ func (c *Controller) recordHealthSample(sample HealthSample) {
 			p.Service7D = 100 * float64(svc7) / float64(n7)
 		}
 		p.mu.Unlock()
-	}
-	if c.onEvent != nil {
-		c.onEvent()
 	}
 }
 
