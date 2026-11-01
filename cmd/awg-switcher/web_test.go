@@ -57,6 +57,37 @@ func TestAdminPasswordStoredAsArgon2HashAndBootstrapIsOneTime(t *testing.T) {
 	}
 }
 
+func TestWebFirstRunSetupConsumesOneTimeToken(t *testing.T) {
+	dir := t.TempDir()
+	code, err := ensureBootstrapToken(dir)
+	if err != nil || code == "" {
+		t.Fatalf("create setup token: token=%q err=%v", code, err)
+	}
+	codeAgain, err := ensureBootstrapToken(dir)
+	if err != nil || codeAgain != code {
+		t.Fatalf("setup token not stable across restart: err=%v", err)
+	}
+	web := &webServer{dataDir: dir, sessions: map[string]webSession{}}
+	body := fmt.Sprintf(`{"token":%q,"password":"synthetic-test-admin-password"}`, code)
+	req := httptest.NewRequest(http.MethodPost, "/api/setup", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	web.handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first-run Web setup status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(adminPath(dir)); err != nil {
+		t.Fatalf("admin credential not created: %v", err)
+	}
+	if _, err := os.Stat(bootstrapPath(dir)); !os.IsNotExist(err) {
+		t.Fatalf("setup token remains after use: %v", err)
+	}
+	rec = httptest.NewRecorder()
+	web.handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/setup", strings.NewReader(body)))
+	if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusConflict {
+		t.Fatalf("replayed setup token status=%d", rec.Code)
+	}
+}
+
 func TestProfileMetadataPersistsWithoutConfigSecrets(t *testing.T) {
 	dir := t.TempDir()
 	c := &Controller{profiles: []*Profile{{ID: "opaque-id", Name: "renamed", Priority: 2, enabled: true, config: []byte(validWG)}}}

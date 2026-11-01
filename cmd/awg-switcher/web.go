@@ -53,7 +53,44 @@ func randomToken(n int) (string, error) {
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
-func adminPath(dir string) string { return filepath.Join(dir, "admin.json") }
+func adminPath(dir string) string     { return filepath.Join(dir, "admin.json") }
+func bootstrapPath(dir string) string { return filepath.Join(dir, "bootstrap.token") }
+
+// ensureBootstrapToken creates a one-time setup credential on an empty data
+// volume. It is logged so Portainer users can complete setup without shell
+// access; successful setup removes it permanently.
+func ensureBootstrapToken(dir string) (string, error) {
+	if _, err := os.Lstat(adminPath(dir)); err == nil {
+		return "", nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	path := bootstrapPath(dir)
+	if b, err := os.ReadFile(path); err == nil {
+		info, statErr := os.Lstat(path)
+		if statErr != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+			return "", errors.New("bootstrap token file permissions are unsafe")
+		}
+		return strings.TrimSpace(string(b)), nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	token, err := randomToken(24)
+	if err != nil {
+		return "", err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return "", err
+	}
+	_, writeErr := io.WriteString(f, token+"\n")
+	closeErr := f.Close()
+	if writeErr != nil || closeErr != nil {
+		_ = os.Remove(path)
+		return "", errors.New("cannot persist setup token")
+	}
+	return token, nil
+}
 
 // initializeAdmin is intentionally a local CLI operation; there is no remote first-user registration.
 func initializeAdmin(dir string, password []byte) error {
@@ -149,6 +186,8 @@ func (s *webServer) authenticated(r *http.Request) (webSession, bool) {
 func (s *webServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/login", s.login)
+	mux.HandleFunc("/api/setup/status", s.setupStatus)
+	mux.HandleFunc("/api/setup", s.setup)
 	mux.HandleFunc("/assets.css", func(w http.ResponseWriter, r *http.Request) {
 		b, e := webFiles.ReadFile("web/assets.css")
 		if e != nil {
@@ -160,6 +199,15 @@ func (s *webServer) handler() http.Handler {
 	})
 	mux.HandleFunc("/app.js", func(w http.ResponseWriter, r *http.Request) {
 		b, e := webFiles.ReadFile("web/app.js")
+		if e != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		_, _ = w.Write(b)
+	})
+	mux.HandleFunc("/setup.js", func(w http.ResponseWriter, r *http.Request) {
+		b, e := webFiles.ReadFile("web/setup.js")
 		if e != nil {
 			http.NotFound(w, r)
 			return
@@ -205,6 +253,65 @@ func (s *webServer) handler() http.Handler {
 		}
 		mux.ServeHTTP(w, r)
 	})
+}
+
+func (s *webServer) setupStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	_, err := os.Lstat(adminPath(s.dataDir))
+	writeJSON(w, map[string]bool{"initialized": err == nil})
+}
+
+func (s *webServer) setup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.mu.Lock()
+	cutoff := time.Now().Add(-10 * time.Minute)
+	kept := s.failures[:0]
+	for _, at := range s.failures {
+		if at.After(cutoff) {
+			kept = append(kept, at)
+		}
+	}
+	s.failures = kept
+	if len(s.failures) >= 8 || s.loginActive >= 2 {
+		s.mu.Unlock()
+		http.Error(w, "setup temporarily rate limited", http.StatusTooManyRequests)
+		return
+	}
+	s.loginActive++
+	s.mu.Unlock()
+	defer func() { s.mu.Lock(); s.loginActive--; s.mu.Unlock() }()
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	var input struct {
+		Token    string `json:"token"`
+		Password string `json:"password"`
+	}
+	if json.NewDecoder(r.Body).Decode(&input) != nil || len(input.Password) < 14 || len(input.Password) > 1024 {
+		http.Error(w, "invalid setup request or password length", http.StatusBadRequest)
+		return
+	}
+	token, err := os.ReadFile(bootstrapPath(s.dataDir))
+	if err != nil || subtle.ConstantTimeCompare([]byte(strings.TrimSpace(string(token))), []byte(input.Token)) != 1 {
+		s.mu.Lock()
+		s.failures = append(s.failures, time.Now())
+		s.mu.Unlock()
+		http.Error(w, "invalid setup code", http.StatusUnauthorized)
+		return
+	}
+	if err := initializeAdmin(s.dataDir, []byte(input.Password)); err != nil {
+		http.Error(w, "administrator setup failed", http.StatusConflict)
+		return
+	}
+	if err := os.Remove(bootstrapPath(s.dataDir)); err != nil {
+		http.Error(w, "administrator initialized but setup token cleanup failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]bool{"initialized": true})
 }
 func (s *webServer) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
