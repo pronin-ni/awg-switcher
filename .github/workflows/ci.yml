@@ -30,6 +30,7 @@ jobs:
         run: |
           node --check cmd/awg-switcher/web/app.js
           node --check cmd/awg-switcher/web/setup.js
+          node --check cmd/awg-switcher/web/diagnostics.js
           docker compose -f docker-compose.yml config --quiet
           docker compose -f docker-compose.yml -f docker-compose.lan.example.yml config --quiet
       - name: Dependency vulnerability scan
