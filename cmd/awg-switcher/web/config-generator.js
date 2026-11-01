@@ -3,6 +3,7 @@
 
   const $ = (selector) => document.querySelector(selector);
   let csrf = '';
+  let settingsLoaded = false;
 
   async function api(path, options = {}) {
     const headers = new Headers(options.headers || {});
@@ -59,6 +60,7 @@
   $('#generate-warp-open').addEventListener('click', () => {
     $('#generator-result').replaceChildren();
     $('#warp-generator-dialog').showModal();
+    if (!settingsLoaded) loadSettings();
   });
   $('#generator-close').addEventListener('click', () => $('#warp-generator-dialog').close());
 
@@ -71,6 +73,7 @@
       const result = await api('/api/config-generator/settings', { method: 'POST', body: JSON.stringify(body) });
       $('#generator-token').value = '';
       $('#generator-clear-token').checked = false;
+      settingsLoaded = true;
       status.textContent = result.token_configured
         ? 'Настройки сохранены; Bearer-токен защищённо хранится на сервере.'
         : 'Настройки сохранены.';
@@ -113,6 +116,7 @@
     try {
       const settings = await api('/api/config-generator/settings');
       $('#generator-url').value = settings.url;
+      settingsLoaded = true;
       $('#generator-settings-status').textContent = settings.token_configured
         ? 'Self-hosted Bearer-токен настроен.'
         : 'Используется стандартный API awgconfig.com.';
@@ -120,6 +124,4 @@
       $('#generator-settings-status').textContent = error.message;
     }
   }
-
-  loadSettings();
 })();
