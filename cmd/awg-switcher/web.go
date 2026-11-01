@@ -38,13 +38,18 @@ type webSession struct {
 	expires time.Time
 }
 type webServer struct {
-	controller  *Controller
-	dataDir     string
-	mu          sync.Mutex
-	persistMu   sync.Mutex
-	sessions    map[string]webSession
-	failures    []time.Time
-	loginActive int
+	controller      *Controller
+	dataDir         string
+	mu              sync.Mutex
+	persistMu       sync.Mutex
+	sessions        map[string]webSession
+	failures        []time.Time
+	loginActive     int
+	configGenMu     sync.Mutex
+	configGenLoaded bool
+	configGen       configGeneratorSettings
+	configGenRun    sync.Mutex
+	configGenStarts []time.Time
 }
 
 func randomToken(n int) (string, error) {
@@ -225,6 +230,15 @@ func (s *webServer) handler() http.Handler {
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 		_, _ = w.Write(b)
 	})
+	mux.HandleFunc("/config-generator.js", func(w http.ResponseWriter, r *http.Request) {
+		b, e := webFiles.ReadFile("web/config-generator.js")
+		if e != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		_, _ = w.Write(b)
+	})
 	mux.HandleFunc("/api/session", s.session)
 	mux.HandleFunc("/api/status", s.requireAuth(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.controller.snapshot()) }))
 	mux.HandleFunc("/api/events", s.requireAuth(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.controller.snapshot().Events) }))
@@ -233,6 +247,9 @@ func (s *webServer) handler() http.Handler {
 	mux.HandleFunc("/api/diagnostics/check", s.requireAuth(s.diagnosticCheck))
 	mux.HandleFunc("/api/diagnostics/debug", s.requireAuth(s.networkDebug))
 	mux.HandleFunc("/api/support-bundle", s.requireAuth(s.downloadSupportBundle))
+	mux.HandleFunc("/api/config-generator/settings", s.requireAuth(s.configGeneratorSettingsHandler))
+	mux.HandleFunc("/api/config-generator/test", s.requireAuth(s.testConfigGeneratorHandler))
+	mux.HandleFunc("/api/config-generator/generate", s.requireAuth(s.generateWarpProfilesHandler))
 	mux.HandleFunc("/logout", s.requireAuth(s.logout))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -479,50 +496,11 @@ func (s *webServer) upload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	profileDir := filepath.Join(s.dataDir, "profiles")
-	if err = os.MkdirAll(profileDir, 0700); err != nil {
-		http.Error(w, "profile storage unavailable", 500)
-		return
-	}
-	dirInfo, err := os.Lstat(profileDir)
-	if err != nil || !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 {
-		http.Error(w, "profile storage path is unsafe", 500)
-		return
-	}
-	if err = os.Chmod(profileDir, 0700); err != nil {
-		http.Error(w, "profile storage permissions unavailable", 500)
-		return
-	}
-	id, err := randomToken(12)
-	if err != nil {
-		http.Error(w, "profile ID unavailable", 500)
-		return
-	}
-	id = strings.ToLower(strings.TrimRight(base64.RawURLEncoding.EncodeToString([]byte(id)), "=")) // generated path component only
-	// Prefer a UUID-like opaque identifier over any client filename.
-	path := filepath.Join(s.dataDir, "profiles", id+".conf")
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".upload-*.tmp")
+	id, path, err := storeImportedProfile(s.dataDir, normalized)
 	if err != nil {
 		http.Error(w, "profile storage unavailable", 500)
 		return
 	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err = tmp.Chmod(0600); err == nil {
-		_, err = tmp.Write(normalized)
-	}
-	if e := tmp.Close(); err == nil {
-		err = e
-	}
-	if err != nil {
-		http.Error(w, "profile write failed", 500)
-		return
-	}
-	if err = os.Link(tmpName, path); err != nil {
-		http.Error(w, "profile ID collision; retry upload", 409)
-		return
-	}
-	_ = os.Remove(tmpName)
 	name := strings.TrimSuffix(filepath.Base(header.Filename), filepath.Ext(header.Filename))
 	p, err := s.controller.addRuntimeProfile(id, name, normalized, path)
 	if err != nil {
@@ -780,9 +758,10 @@ func (s *webServer) downloadSupportBundle(w http.ResponseWriter, r *http.Request
 }
 
 type profileState struct {
-	Name     string `json:"name"`
-	Priority int    `json:"priority"`
-	Enabled  bool   `json:"enabled"`
+	Name      string `json:"name"`
+	Priority  int    `json:"priority"`
+	Enabled   bool   `json:"enabled"`
+	LastError string `json:"last_error,omitempty"`
 }
 
 func (s *webServer) persistState() error {
@@ -791,7 +770,7 @@ func (s *webServer) persistState() error {
 	items := map[string]profileState{}
 	for _, p := range s.controller.profilesSnapshot() {
 		p.mu.Lock()
-		items[p.ID] = profileState{Name: p.Name, Priority: p.Priority, Enabled: p.enabled}
+		items[p.ID] = profileState{Name: p.Name, Priority: p.Priority, Enabled: p.enabled, LastError: p.LastError}
 		p.mu.Unlock()
 	}
 	s.controller.eventsMu.Lock()
@@ -855,6 +834,7 @@ func loadProfileState(dir string, profiles []*Profile) error {
 			p.Name = v.Name
 			p.Priority = v.Priority
 			p.enabled = v.Enabled
+			p.LastError = v.LastError
 			if !v.Enabled {
 				p.State = "DISABLED"
 			}

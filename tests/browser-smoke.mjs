@@ -51,6 +51,17 @@ try {
   await page.locator('#dashboard').waitFor({ state: 'visible' });
 
   await page.locator('a[href="#profiles"]').click();
+  await page.locator('#generator-url').waitFor({ state: 'visible' });
+  if ((await page.locator('#generator-url').inputValue()) !== 'http://awg-config-gen:3000') {
+    throw new Error('optional generator did not default to the local Docker service');
+  }
+  await page.locator('#generator-mode').selectOption('awg31');
+  await page.locator('#generator-count').selectOption('3');
+  if (await page.locator('#generator-enable-actions button').count()) {
+    throw new Error('generator unexpectedly offered profile enablement before a verified generation');
+  }
+  await page.locator('#generator-test').click();
+  await page.locator('#generator-settings-status').getByText(/Генератор недоступен/).waitFor({ timeout: 15000 });
   const input = page.locator('#files');
   await input.setInputFiles([
     { name: 'primary.conf', mimeType: 'text/plain', buffer: Buffer.from(config) },
@@ -103,7 +114,7 @@ try {
   await page.locator('#download-support').click();
   const report = await downloadPromise;
   if (report.suggestedFilename() !== 'awg-switcher-support.json') throw new Error('unexpected support report filename');
-  console.log('PASS: first-run setup, login, profile upload/order persistence, Network Debug toggle and support report download');
+  console.log('PASS: first-run setup, login, optional generator defaults/unavailable behavior, profile upload/order persistence, Network Debug toggle and support report download');
 } finally {
   await browser?.close();
   try { docker('rm', '-f', name); } catch {}

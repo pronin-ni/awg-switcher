@@ -31,8 +31,10 @@ jobs:
           node --check cmd/awg-switcher/web/app.js
           node --check cmd/awg-switcher/web/setup.js
           node --check cmd/awg-switcher/web/diagnostics.js
+          node --check cmd/awg-switcher/web/config-generator.js
           docker compose -f docker-compose.yml config --quiet
           docker compose -f docker-compose.yml -f docker-compose.lan.example.yml config --quiet
+          docker compose -f generator/docker-compose.yml config --quiet
       - name: Dependency vulnerability scan
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.2.0 ./...
       - name: Validate Compose model

@@ -1,0 +1,37 @@
+name: awg-config-generator
+
+# Optional, standalone upstream service. The build context is pinned to an
+# immutable upstream commit; AWG Switcher does not vendor or copy its source.
+# No host port is published. Only containers attached to proxy-network can call it.
+services:
+  awg-config-gen:
+    image: local/amnezia-config-gen:cebc09e46f636f74e6ddc4ec1dae94b8d3046e12
+    build:
+      context: https://github.com/HereIamGosu/amnezia-config-gen.git#cebc09e46f636f74e6ddc4ec1dae94b8d3046e12
+      dockerfile: deploy/Dockerfile
+      args:
+        APP_REVISION: cebc09e46f636f74e6ddc4ec1dae94b8d3046e12
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 1.0
+    pids_limit: 128
+    expose:
+      - "3000"
+    networks:
+      - proxy-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  proxy-network:
+    external: true

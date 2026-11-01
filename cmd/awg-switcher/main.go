@@ -470,6 +470,34 @@ func (c *Controller) addRuntimeProfile(id, name string, config []byte, path stri
 	c.launchProfile(p)
 	return p, nil
 }
+
+func (c *Controller) addDisabledRuntimeProfile(id, name string, config []byte, path string) (*Profile, error) {
+	c.dynamicMu.Lock()
+	defer c.dynamicMu.Unlock()
+	if c.maxEngines > 0 && len(c.profilesSnapshot()) >= c.maxEngines {
+		return nil, errors.New("profile limit reached")
+	}
+	priority := 0
+	c.profilesMu.Lock()
+	for _, existing := range c.profiles {
+		if existing.ID == id {
+			c.profilesMu.Unlock()
+			return nil, errors.New("profile already exists")
+		}
+		existing.mu.Lock()
+		if existing.Priority >= priority {
+			priority = existing.Priority + 1
+		}
+		existing.mu.Unlock()
+	}
+	c.profilesMu.Unlock()
+	p := &Profile{ID: id, Name: name, Priority: priority, State: "DISABLED", path: path, config: append([]byte(nil), config...), restartReq: make(chan struct{}, 1), enabled: false}
+	c.prepareProfile(p)
+	c.profilesMu.Lock()
+	c.profiles = append(c.profiles, p)
+	c.profilesMu.Unlock()
+	return p, nil
+}
 func (c *Controller) findProfile(id string) *Profile {
 	for _, p := range c.profilesSnapshot() {
 		if p.ID == id {

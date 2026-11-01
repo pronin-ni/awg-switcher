@@ -84,6 +84,14 @@ For Docker-only development from a checkout, use `docker-compose.dev.yml`; the P
 - Health checks retain the 8-second timeout. Manual diagnostics default to 30 seconds, proxy CONNECT to 30 seconds, TLS handshake to 10 seconds, and HTTP response headers to 20 seconds. DNS resolution is delegated to wireproxy and reported as unobservable at the application boundary; there is no direct fallback.
 - English/Russian interface, responsive layout and light/dark system mode. Language/theme preferences are the only UI settings in localStorage; credentials and config secrets are not.
 
+### Optional WARP config generator
+
+WARP generation is provided by a separate self-hosted `amnezia-config-gen` service; it is not required for the normal single-container install, profile import, proxy or failover. `generator/docker-compose.yml` builds the upstream project at pinned commit `cebc09e46f636f74e6ddc4ec1dae94b8d3046e12` with its own AGPL-3.0 Dockerfile. No upstream source is copied into AWG Switcher, and this Compose publishes no host port.
+
+Create the external `proxy-network` if needed, then deploy `generator/docker-compose.yml` as a separate Portainer Stack or run `docker compose -f generator/docker-compose.yml up -d --build`. In **Profiles → Генератор WARP-конфигов**, use `http://awg-config-gen:3000` for the local service and test the connection. For a VPS, configure an HTTPS DNS hostname behind a reverse proxy that requires the supplied Bearer token; save that URL and token in the UI. Do not expose the upstream unauthenticated API directly to the internet. The backend rejects arbitrary HTTP/private remote destinations and does not follow redirects.
+
+Choose AWG 2.0/3.0/3.1 and 1–3 configs. Requests always use hostname Endpoint, IPv4 full tunnel (`AllowedIPs = 0.0.0.0/0`) and stable CPS; Endpoint Lab and experimental CPS options are not enabled. Each result is decoded, validated and stored as a disabled profile. AWG Switcher separately probes `https://api.ipify.org` through a temporary engine on the AWG Switcher host; generation success alone is not treated as connectivity. The primary profile is not changed. Only profiles that pass this HTTPS probe are offered for explicit inclusion in failover.
+
 `/healthz` reports process liveness and `/readyz` is 200 only with an active healthy VPN. When there are no configs, the process and UI remain available while readiness and proxy requests fail closed.
 
 ## Verification and operations
