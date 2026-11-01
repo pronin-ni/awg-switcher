@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -642,10 +643,10 @@ func (s *webServer) profile(w http.ResponseWriter, r *http.Request) {
 			p.mu.Unlock()
 		}
 		if req.Priority != nil {
-			p.mu.Lock()
-			p.Priority = *req.Priority
-			p.mu.Unlock()
-			s.controller.sortProfiles()
+			if err := s.controller.setProfilePriority(id, *req.Priority); err != nil {
+				http.Error(w, "profile priority update failed", 409)
+				return
+			}
 		}
 		if req.Enabled != nil {
 			if err := s.controller.setProfileEnabled(id, *req.Enabled); err != nil {
@@ -797,6 +798,9 @@ func loadProfileState(dir string, profiles []*Profile) error {
 			}
 		}
 	}
+	sort.SliceStable(profiles, func(i, j int) bool {
+		return profiles[i].Priority < profiles[j].Priority
+	})
 	return nil
 }
 func loadStateEvents(dir string) ([]ControllerEvent, error) {

@@ -425,15 +425,23 @@ func (c *Controller) addRuntimeProfile(id, name string, config []byte, path stri
 	if c.maxEngines > 0 && len(c.profilesSnapshot()) >= c.maxEngines {
 		return nil, errors.New("profile limit reached")
 	}
-	p := &Profile{Name: name, ID: id, Priority: 1000, State: "STARTING", path: path, config: append([]byte(nil), config...), restartReq: make(chan struct{}, 1), enabled: true}
-	c.prepareProfile(p)
+	priority := 0
 	c.profilesMu.Lock()
 	for _, x := range c.profiles {
 		if x.ID == id {
 			c.profilesMu.Unlock()
 			return nil, errors.New("profile already exists")
 		}
+		x.mu.Lock()
+		if x.Priority >= priority {
+			priority = x.Priority + 1
+		}
+		x.mu.Unlock()
 	}
+	c.profilesMu.Unlock()
+	p := &Profile{Name: name, ID: id, Priority: priority, State: "STARTING", path: path, config: append([]byte(nil), config...), restartReq: make(chan struct{}, 1), enabled: true}
+	c.prepareProfile(p)
+	c.profilesMu.Lock()
 	c.profiles = append(c.profiles, p)
 	c.profilesMu.Unlock()
 	c.launchProfile(p)
@@ -463,6 +471,45 @@ func (c *Controller) sortProfiles() {
 	})
 	c.profilesMu.Unlock()
 	c.selectProfile()
+}
+
+// setProfilePriority reorders the selected profile relative to its current
+// peers, then stores a unique, contiguous priority sequence. This avoids ties
+// when the UI moves a profile up/down and makes startup order deterministic.
+func (c *Controller) setProfilePriority(id string, priority int) error {
+	c.dynamicMu.Lock()
+	defer c.dynamicMu.Unlock()
+	c.profilesMu.Lock()
+	target := -1
+	for i, p := range c.profiles {
+		if p.ID == id {
+			target = i
+			break
+		}
+	}
+	if target < 0 {
+		c.profilesMu.Unlock()
+		return errors.New("profile not found")
+	}
+	p := c.profiles[target]
+	c.profiles = append(c.profiles[:target], c.profiles[target+1:]...)
+	if priority < 0 {
+		priority = 0
+	}
+	if priority > len(c.profiles) {
+		priority = len(c.profiles)
+	}
+	c.profiles = append(c.profiles, nil)
+	copy(c.profiles[priority+1:], c.profiles[priority:])
+	c.profiles[priority] = p
+	for i, p := range c.profiles {
+		p.mu.Lock()
+		p.Priority = i
+		p.mu.Unlock()
+	}
+	c.profilesMu.Unlock()
+	c.selectProfile()
+	return nil
 }
 func (c *Controller) setProfileEnabled(id string, enabled bool) error {
 	c.dynamicMu.Lock()
@@ -567,6 +614,11 @@ func (c *Controller) removeRuntimeProfile(id string) error {
 			c.profiles = append(c.profiles[:i], c.profiles[i+1:]...)
 			break
 		}
+	}
+	for i, x := range c.profiles {
+		x.mu.Lock()
+		x.Priority = i
+		x.mu.Unlock()
 	}
 	c.profilesMu.Unlock()
 	if p.transport != nil {

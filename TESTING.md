@@ -40,3 +40,12 @@ Validation date: 2026-11-01. This report omits credentials, VPN keys, raw public
 - PR #1 was squash-merged into `main` as `85044df`; CI also passed on `df5acd6`. The new Portainer zero-config changes are being validated in the current development branch and have not yet published an image. No production NAS deployment was performed.
 
 **Overall: DEVELOPMENT. Prior VPN engine/failover validation passed on the isolated VPS. The new empty-volume/admin onboarding passed local Docker E2E; it still needs CI and integration with a new real profile. Radarr compatibility through the tested VPN exits remains unresolved; do not bypass VPN fail-closed routing.**
+
+## Pre-first-run fixes (2026-11-01)
+
+- Runtime-import priorities now start at `0` for the first profile and append subsequent profiles by upload order. UI up/down moves insert at the requested position and renumber priorities uniquely; deleting a profile compacts ranks without changing relative order. Disabling/re-enabling preserves order. Saved priorities and enabled state are restored and the discovered profile slice is sorted by restored priority on startup.
+- Added `TestRuntimePriorityOrderAndRestartPersistence` covering order, priority movement, disable/restore, deletion, and simulated rediscovery after restart.
+- Added `node --check` for `web/setup.js` and a Playwright Chromium smoke test in CI. The local real-browser smoke passed against a Docker image and empty named volume: setup token, admin creation/login, dashboard, two `.conf` uploads, listing, UI reorder, restart, login, and restored profile order.
+- Local Docker hardened bind-mount check passed with the production capability set, read-only root, tmpfs and `no-new-privileges`: the container created its own bootstrap file without manual directory creation/ownership/mode changes; PID 1 effective UID/GID was `10001:10001`.
+- TOS 6 read-only diagnostics and a disposable capability/ACL probe are documented in README. This environment is not a TerraMaster TOS 6 host, so TOS ACL behavior itself was not observed.
+- No `creds/` directory or accessible VPS connection details are present in this checkout/session. Consequently no new real-profile VPN, failover/recovery, egress, or per-exit Radarr checks were run. Historical VPS results above remain the only live VPN evidence. Do not infer that the tested VPN exits can reach Radarr; the fail-closed behavior remains unchanged.
