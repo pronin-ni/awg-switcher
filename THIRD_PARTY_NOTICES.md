@@ -4,7 +4,7 @@ AWG Switcher is not an official AmneziaVPN product and is not affiliated with or
 
 ## Distributed runtime components
 
-The Docker image includes the upstream `wireproxy` executable and the Go application. The image also includes the Mozilla-derived `ca-certificates-bundle=20261020-r0` root bundle from Alpine v3.22/x86_64 for outbound TLS verification. Alpine declares that package `MPL-2.0 AND MIT`; the MPL 2.0 text is in `licenses/mozilla-ca/MPL-2.0.txt`. CA certificates are issued by their respective authorities and may carry certificate-specific terms. The package version is pinned in the Docker build; exact package/certificate notice contents still need final image verification. License documents for Go dependencies are included under `/usr/share/licenses/` in the image and under `licenses/` in this source repository.
+The Docker image includes the upstream `wireproxy` executable and the Go application. The image also includes the Mozilla-derived `ca-certificates-bundle=20261020-r0` root bundle from Alpine v3.22/x86_64 for outbound TLS verification. Alpine declares that package `MPL-2.0 AND MIT`; the MPL 2.0 text is in `licenses/mozilla-ca/MPL-2.0.txt`. CA certificates are issued by their respective authorities and may carry certificate-specific terms; a certificate-level legal review remains open. License documents for Go dependencies are included under `/usr/share/licenses/` in the image and under `licenses/` in this source repository.
 
 ### wireproxy
 
@@ -19,5 +19,9 @@ The bundled wireproxy v2.1.0 reports dependency `github.com/amnezia-vpn/amneziaw
 ### yaml.v3
 
 `gopkg.in/yaml.v3 v3.0.1` (module `go-yaml/yaml`), MIT and Apache-2.0 dual-licensed. License text is retained in `licenses/yaml.v3/LICENSE`. `go-licenses` identifies MIT for the imported package; the full upstream dual-license text is preserved.
+
+### Admin security dependencies
+
+The Go application imports `golang.org/x/crypto v0.58.0` for Argon2id and `golang.org/x/term v0.47.0` for no-echo password entry in the local bootstrap CLI. Both are BSD-3-Clause; license texts are retained in `licenses/` and copied into the runtime image. The embedded UI is plain JavaScript/CSS/HTML without third-party packages or telemetry.
 
 See `DEPENDENCIES.md` and `licenses/` for the detailed component inventory and required notices. The source license above applies only to original AWG Switcher code; it does not replace these third-party terms.

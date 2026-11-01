@@ -1,0 +1,7 @@
+# Optional Portainer override. Verify the NAS address before use.
+services:
+  awg-switcher:
+    ports:
+      - "192.168.31.12:2080:8080"
+    environment:
+      AWG_COOKIE_SECURE: "false"

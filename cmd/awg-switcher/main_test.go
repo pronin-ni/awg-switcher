@@ -124,7 +124,7 @@ func TestProcessEngineStopsAndRemovesPrivateRuntimeConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	config := filepath.Join(dir, "runtime", "profile-0.conf")
+	config := filepath.Join(dir, "runtime", "profile-00000000.conf")
 	info, err := os.Stat(config)
 	if err != nil {
 		t.Fatal(err)
@@ -187,8 +187,8 @@ func TestSelectProfileUsesPriorityAndAtomicActive(t *testing.T) {
 		RecoveryInterval  time.Duration `yaml:"recovery_interval"`
 		SwitchCooldown    time.Duration `yaml:"switch_cooldown"`
 	}{Enabled: true, SwitchCooldown: time.Second}}}
-	primary := &Profile{Name: "primary", Priority: 0, Healthy: true}
-	backup := &Profile{Name: "backup", Priority: 1, Healthy: true}
+	primary := &Profile{Name: "primary", Priority: 0, Healthy: true, enabled: true}
+	backup := &Profile{Name: "backup", Priority: 1, Healthy: true, enabled: true}
 	c.profiles = []*Profile{primary, backup}
 	c.selectProfile()
 	if got := c.active.Load(); got != primary {
@@ -198,5 +198,14 @@ func TestSelectProfileUsesPriorityAndAtomicActive(t *testing.T) {
 	c.selectProfile()
 	if got := c.active.Load(); got != backup {
 		t.Fatalf("active profile=%v, want backup", got)
+	}
+}
+
+func TestSnapshotActiveIsStableProfileIDNotDisplayName(t *testing.T) {
+	p := &Profile{ID: "opaque-profile-id", Name: "Readable name", Priority: 1, Healthy: true, enabled: true}
+	c := &Controller{profiles: []*Profile{p}}
+	c.active.Store(p)
+	if got := c.snapshot().Active; got != p.ID {
+		t.Fatalf("snapshot active=%q; want stable id %q", got, p.ID)
 	}
 }

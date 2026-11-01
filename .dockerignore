@@ -9,4 +9,7 @@ data
 *.crt
 *.log
 runtime
+dist
+node_modules
+gitleaks*.json
 .DS_Store

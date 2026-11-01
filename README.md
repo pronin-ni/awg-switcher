@@ -1,85 +1,66 @@
 # AWG Switcher
 
-AWG Switcher is a single-container HTTP forward proxy with independent WireGuard/AmneziaWG userspace sessions and HTTPS-based failover. It does not create a host tunnel, change host routes, or provide a DIRECT fallback. HTTP targets and target hostnames are sent through the active profile's loopback SOCKS5 listener.
+AWG Switcher is a single-container AmneziaWG/WireGuard proxy with a protected self-hosted management UI. The Go controller supervises independent `bropines/awg-wireproxy v2.1.0` sessions, routes HTTP(S) via per-profile SOCKS5, and fails closed when no VPN route is healthy. It does not configure host/NAS routes.
 
-> **Status: development / not production-ready.** Linux/amd64 Docker build and two-profile LIVE checks have run on a dedicated test VPS. The observed public egress-IP fingerprints for both supplied profiles were identical; the requested Radarr endpoints also did not complete CONNECT from that test network. See [`TESTING.md`](TESTING.md). Do not use this image for production, and do not publish a GHCR release until all gates pass.
+> **Development / not production-ready.** The UI/admin service, runtime profile manager and persistence are under active validation. Prior LIVE checks proved HTTPS via two real profiles and failover/recovery, but the profiles had identical public egress-IP fingerprints. Radarr endpoints did not complete from the prior test exits. Licensing/provenance review remains open. No GHCR stable image is published. See [TESTING](TESTING.md) and [LICENSE_STATUS](LICENSE_STATUS.md).
 
-## Components and limitations
+## Ports and security
 
-- Controller and HTTP(S) proxy: Go; listen on port `20171` inside the container.
-- Engine: pinned `bropines/awg-wireproxy v2.1.0`, embedding AmneziaWG Go `v3.1.20260828`.
-- One supervised engine/SOCKS5 listener per discovered valid profile. Backoff is exponential and capped; process logs are discarded to avoid accidental key disclosure.
-- Priority selection, HTTPS probes through each profile, failure/recovery thresholds, cooldown, primary recovery, and fail-closed behavior are implemented.
-- WireGuard and AWG fields accepted by the pinned parser are preserved. Bare IPv4/IPv6 addresses are normalized to `/32` and `/128`. Unknown fields are rejected, not silently dropped. Parser acceptance alone does not establish compatibility with every AWG version; compatibility must be verified with the pinned engine.
-- No proxy authentication is implemented. Attach only trusted clients to the proxy Docker network. Do not publish port `20171` to the internet.
-- `health.urls` must be HTTPS. Any HTTP response (including 403, 429, or 5xx) proves the route reached that endpoint; a site-specific HTTP error is not treated as VPN failure.
+- `20171`: forward proxy only. Never publish it to a host port or the internet. Use `http://awg-switcher:20171` from trusted containers on `proxy-network`.
+- `8080`: Web UI and authenticated admin API. Not published by default in Compose. Bind it only to a trusted LAN address or reach it through an SSH tunnel. First-admin creation is local CLI only: `docker exec -it awg-switcher /usr/local/bin/awg-switcher create-admin`.
+- Admin password uses Argon2id; session cookies are HttpOnly/SameSite Strict; mutating API requests require CSRF. The panel has no remote account registration. The proxy listener does not serve administrative APIs.
 
-Licensing remains **LICENSE REVIEW REQUIRED**. The pinned upstream wireproxy tag is unsigned; Docker verifies the pinned source commit and compiles from that source with Go 1.27.3 and security-updated Go modules. The image SBOM/license inventory is available, but Trivy cannot identify Go module licenses from the stripped binaries, the x/crypto legacy OpenPGP advisory is reported at module level (not reachable per govulncheck), and the unsigned-tag provenance risk remains. See [`LICENSE_STATUS.md`](LICENSE_STATUS.md).
+The app runs as UID/GID `10001`, with a read-only root filesystem, only `/run/awg-switcher` tmpfs and `/app/data` writable. Filesystem profiles remain read-only in `/app/configs`; UI-imported profiles are stored as `0600` files in `/app/data/profiles`. `state.db` is a compact JSON state document, written atomically with mode `0600`; it stores profile metadata and a bounded switch/error/restart event history (no database daemon or dependency). Private keys are never included in profile-list JSON or safe config view.
 
-## TerraMaster / Portainer layout
+## TerraMaster / Portainer
 
-Use one stack and the following host paths:
+Host layout:
 
 ```text
 /Volume2/docker/awg-switcher/
-├── configs/
-│   ├── primary.conf
-│   ├── backup1.conf
-│   └── backup2.conf
+├── configs/          # optional legacy/read-only .conf files
 ├── settings.yaml
-└── data/
+└── data/             # admin hash, state.db, profiles/ (chmod 0600)
 ```
 
-1. Create the directories and copy `settings.example.yaml` to `settings.yaml`.
-2. Copy only the desired real profiles to `configs/`. Do not commit them. Protect the directory and backups as secrets.
-3. Edit `profiles.primary` and `profiles.priority` to match the exact filenames.
-4. The container runs as UID/GID `10001`. Make the mounted files readable only by that UID and the directory traversable by it (for example, `chown -R 10001:10001 configs settings.yaml data && chmod 0700 configs data && chmod 0400 settings.yaml configs/*.conf`). Keep the parent deployment directory protected from other host users.
-5. Ensure the external Docker network `proxy-network` exists. The Compose stack does not create a NAS tunnel or modify global routes.
-6. Deploy the repository's `docker-compose.yml` from `/Volume2/docker/awg-switcher/` (or use its equivalent Portainer stack with the same mounts and security settings). The current Compose file builds the image locally; a public GHCR image is not yet released.
-7. Keep the service name `awg-switcher` and do not add a host port mapping. Consumers attached to `proxy-network` use `http://awg-switcher:20171`.
+1. Create directories and settings; keep VPN configs private.
+2. Ensure Docker network `proxy-network` exists.
+3. Set volume ownership to UID/GID 10001; deploy `docker-compose.yml` as one stack. It publishes **no host ports**.
+4. For the first admin, use `docker exec -it awg-switcher /usr/local/bin/awg-switcher create-admin`; enter a long unique password twice. Never put it in Compose, shell arguments, or logs.
+5. To use the panel on the NAS LAN, add the optional `ports` section from [`docker-compose.lan.example.yml`](docker-compose.lan.example.yml), after verifying the NAS LAN address. It binds `192.168.31.12:2080` only; do not add a proxy host mapping. The UI is `http://192.168.31.12:2080`.
+6. Import one or more `.conf` files in the UI, inspect status, then configure client containers to use `http://awg-switcher:20171`.
+
+Example preparation (run as an administrator on the NAS):
 
 ```sh
 mkdir -p /Volume2/docker/awg-switcher/{configs,data}
 cp settings.example.yaml /Volume2/docker/awg-switcher/settings.yaml
+chown -R 10001:10001 /Volume2/docker/awg-switcher/{configs,data}
+chmod 0700 /Volume2/docker/awg-switcher/{configs,data}
+chmod 0400 /Volume2/docker/awg-switcher/settings.yaml
 docker network inspect proxy-network >/dev/null 2>&1 || docker network create proxy-network
-cd /Volume2/docker/awg-switcher
-chown -R 10001:10001 configs settings.yaml data
-chmod 0700 configs data
-chmod 0400 settings.yaml configs/*.conf
-docker compose config
-docker compose up -d --build
-docker compose logs -f awg-switcher
 ```
 
-The image runs as UID/GID `10001`, with a read-only root filesystem and a private runtime tmpfs. Mount profile files read-only. `/healthz` reports process liveness; `/readyz` requires a healthy VPN profile. `/api/status`, `/api/profiles`, and `/api/active` expose status only on the attached Docker network. Do not attach untrusted containers to this network.
+The base Compose uses a local Docker build. No image is published yet. Keep Jellyfin video, NPM, qBittorrent and other production service routing unchanged unless separately approved.
 
-## Configure and verify
+## UI features
 
-See [`settings.example.yaml`](settings.example.yaml). Defaults are 15-second checks, 8-second timeout, 2 failed checks to mark unavailable, 3 passing checks to recover, 60-second recovery-probe interval for higher-priority profiles, and 30-second switch cooldown. Emergency failover is not delayed by cooldown.
+- Dashboard with active route, health, profile counts, switch count, uptime and in-flight proxy requests; polling refreshes the display. A bounded event history survives container restarts.
+- Import `.conf` at up to 1 MiB each, multiple files, drag-and-drop, safe view, profile rename, priority, enable/disable, manual primary selection (30-minute maximum), health check and deletion of imported profiles.
+- URL diagnostics accepts HTTPS only and probes through the selected profile's SOCKS5 route. DNS resolution for the target hostname is requested through SOCKS5; there is no direct fallback.
+- English/Russian interface, responsive layout and light/dark system mode. Language/theme preferences are the only UI settings in localStorage; credentials and config secrets are not.
 
-From an attached test container:
+`/healthz` reports process liveness and `/readyz` is 200 only with an active healthy VPN. When there are no configs, the process and UI remain available while readiness and proxy requests fail closed.
 
-```sh
-curl -x http://awg-switcher:20171 https://api.ipify.org
-curl -x http://awg-switcher:20171 https://www.cloudflare.com/cdn-cgi/trace
-curl http://awg-switcher:20171/api/status
-```
-
-To test failover, use an isolated test stack and interrupt only its selected engine/route. Confirm `/api/status` changes **and** send a new request through the proxy to check the actual egress path. Confirm the primary returns after the configured recovery threshold. Never test by changing NAS routes or stopping another service. With every profile down, proxy requests must fail with 502/503; they must never be sent directly.
-
-## Update and rollback
-
-Back up `settings.yaml` and `configs/` securely. Keep the previous tested source/image tag available. Rebuild/deploy the new revision without deleting the config mounts. To roll back, restore the previous Compose/source revision and settings, then recreate only the `awg-switcher` service. The current data mount is reserved and does not contain VPN keys.
-
-## Development checks
+## Verification and operations
 
 ```sh
+docker compose config --quiet
 go test ./... -count=1
 go test -race ./... -count=1
 go vet ./...
-go run golang.org/x/vuln/cmd/govulncheck@v1.2.0 ./...
-docker compose config
-docker build --platform linux/amd64 -t awg-switcher:test .
 ```
 
-Real `.conf` files belong only in the local ignored `creds/` directory or the deployment's protected `configs/` directory; never add them to tests, build contexts, or CI.
+Logs: `docker compose logs -f awg-switcher`. The panel shows profile state and persisted recent switch/engine events. Back up `settings.yaml`, `configs/` and the protected `data/` directory before upgrades. To roll back, restore the previous tested source/image and Compose/settings, then recreate only `awg-switcher`; do not delete `data/`.
+
+The UI/admin implementation must be treated as development until its live Docker E2E, security review, VPS checks, and license/provenance review are completed. Do not expose admin through NPM/public internet by default.

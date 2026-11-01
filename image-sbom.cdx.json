@@ -2,10 +2,10 @@
   "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
   "bomFormat": "CycloneDX",
   "specVersion": "1.7",
-  "serialNumber": "urn:uuid:32e16478-4bbe-4b85-92e4-507d72fbe3e0",
+  "serialNumber": "urn:uuid:cdb6bfb4-962d-479e-b8d7-13d9bb35ec26",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-11-01T09:50:47+03:00",
+    "timestamp": "2026-11-01T10:52:23+03:00",
     "tools": {
       "components": [
         {
@@ -17,10 +17,10 @@
       ]
     },
     "component": {
-      "bom-ref": "468993de19beef27",
+      "bom-ref": "d7e4a5b8bf51e9bf",
       "type": "container",
-      "name": "/private/var/folders/bf/dp9mxgns34b5rdtyzh5jcf8w0000gn/T/opencode/awg-switcher-linux-amd64-final.tar",
-      "version": "sha256:1ebbf161a59b518ac9a574d8ef380c7d79c1bf35f38d3503ac06a590ef86fd34"
+      "name": "/var/folders/bf/dp9mxgns34b5rdtyzh5jcf8w0000gn/T//awg-switcher-webui-candidate.tar",
+      "version": "sha256:65829a0868b1dbb6854184bd7243d6b7f0267e8933f5f26edda0ae470e2c0ba2"
     }
   },
   "components": [
@@ -49,7 +49,7 @@
         },
         {
           "name": "syft:location:0:layerID",
-          "value": "sha256:c06845aae8d0df5674b029edb178c0ad09e47d6b05e01c38f142b850195f820e"
+          "value": "sha256:3b14e6f14988ca86715800749f5034b1bbd564cbf35b543fa37f1cfd62ed6bb3"
         },
         {
           "name": "syft:location:0:path",
@@ -271,7 +271,7 @@
       "bom-ref": "pkg:golang/github.com/bropines/awg-wireproxy@v0.0.0-20261009150836-02588433b632%2Bdirty?package-id=81b0b4367ccebb2e",
       "type": "library",
       "name": "github.com/bropines/awg-wireproxy",
-      "version": "v0.0.0-20261009150836-02588433b632+dirty",
+      "version": "v2.1.0",
       "cpe": "cpe:2.3:a:bropines:awg-wireproxy:v0.0.0-20261009150836-02588433b632\\+dirty:*:*:*:*:*:*:*",
       "purl": "pkg:golang/github.com/bropines/awg-wireproxy@v0.0.0-20261009150836-02588433b632%2Bdirty",
       "properties": [
@@ -314,6 +314,10 @@
         {
           "name": "syft:metadata:mainModule",
           "value": "github.com/bropines/awg-wireproxy"
+        },
+        {
+          "name": "awg-switcher:source-commit",
+          "value": "02588433b6328171b594d76f3f16bd3404258a83"
         }
       ],
       "licenses": [
@@ -601,6 +605,67 @@
       ]
     },
     {
+      "bom-ref": "pkg:golang/golang.org/x/crypto@v0.58.0?package-id=b1906713eff5e409",
+      "type": "library",
+      "name": "golang.org/x/crypto",
+      "version": "v0.58.0",
+      "cpe": "cpe:2.3:a:golang:crypto:v0.58.0:*:*:*:*:go:*:*",
+      "purl": "pkg:golang/golang.org/x/crypto@v0.58.0",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:go:ssh:v0.58.0:*:*:*:*:go:*:*"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:3b14e6f14988ca86715800749f5034b1bbd564cbf35b543fa37f1cfd62ed6bb3"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/awg-switcher"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.3"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "awg-switcher"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ]
+    },
+    {
       "bom-ref": "pkg:golang/golang.org/x/crypto@v0.58.0?package-id=6a6d85b7f2151e22",
       "type": "library",
       "name": "golang.org/x/crypto",
@@ -780,6 +845,63 @@
       ]
     },
     {
+      "bom-ref": "pkg:golang/golang.org/x/sys@v0.49.0?package-id=e3f7474809ed3c58",
+      "type": "library",
+      "name": "golang.org/x/sys",
+      "version": "v0.49.0",
+      "cpe": "cpe:2.3:a:golang:x\\/sys:v0.49.0:*:*:*:*:*:*:*",
+      "purl": "pkg:golang/golang.org/x/sys@v0.49.0",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:3b14e6f14988ca86715800749f5034b1bbd564cbf35b543fa37f1cfd62ed6bb3"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/awg-switcher"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.3"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "awg-switcher"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ]
+    },
+    {
       "bom-ref": "pkg:golang/golang.org/x/sys@v0.49.0?package-id=8820353af41d8c95",
       "type": "library",
       "name": "golang.org/x/sys",
@@ -826,6 +948,63 @@
         {
           "name": "syft:metadata:mainModule",
           "value": "github.com/bropines/awg-wireproxy"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/golang.org/x/term@v0.47.0?package-id=c86ac144e53a7dc8",
+      "type": "library",
+      "name": "golang.org/x/term",
+      "version": "v0.47.0",
+      "cpe": "cpe:2.3:a:golang:x\\/term:v0.47.0:*:*:*:*:*:*:*",
+      "purl": "pkg:golang/golang.org/x/term@v0.47.0",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:layerID",
+          "value": "sha256:3b14e6f14988ca86715800749f5034b1bbd564cbf35b543fa37f1cfd62ed6bb3"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/usr/local/bin/awg-switcher"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.27.3"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:cpyOwQkr2Nzxe2p6KnrTG7Ei2wtzjsuSjhpXXepZ/BM="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "awg-switcher"
         }
       ],
       "licenses": [
@@ -919,7 +1098,7 @@
         },
         {
           "name": "syft:location:0:layerID",
-          "value": "sha256:c06845aae8d0df5674b029edb178c0ad09e47d6b05e01c38f142b850195f820e"
+          "value": "sha256:3b14e6f14988ca86715800749f5034b1bbd564cbf35b543fa37f1cfd62ed6bb3"
         },
         {
           "name": "syft:location:0:path",
@@ -1105,7 +1284,7 @@
         },
         {
           "name": "syft:location:0:layerID",
-          "value": "sha256:c06845aae8d0df5674b029edb178c0ad09e47d6b05e01c38f142b850195f820e"
+          "value": "sha256:3b14e6f14988ca86715800749f5034b1bbd564cbf35b543fa37f1cfd62ed6bb3"
         },
         {
           "name": "syft:location:0:path",
@@ -1241,17 +1420,17 @@
       ]
     },
     {
-      "bom-ref": "620623ef06022f89",
+      "bom-ref": "5473960a76516080",
       "type": "file",
       "name": "/usr/local/bin/awg-switcher",
       "hashes": [
         {
           "alg": "SHA-1",
-          "content": "1fc2aeec62712c0e0a9e4e92f8263c87df0efe1e"
+          "content": "35c5c3e83ff0d711188712f0b901587227b62ed7"
         },
         {
           "alg": "SHA-256",
-          "content": "ed7759cb2f59308ff834000fa7d93919eb9d7ed37bba269c82f4d337c438744f"
+          "content": "aeab0b4bb6e66a788f9d33115ab1518bc5ad6ac58e43244db27913814a3171d0"
         }
       ],
       "licenses": [
@@ -1291,6 +1470,9 @@
     {
       "ref": "pkg:golang/awg-switcher?package-id=3e3e38d08f3503c6",
       "dependsOn": [
+        "pkg:golang/golang.org/x/crypto@v0.58.0?package-id=b1906713eff5e409",
+        "pkg:golang/golang.org/x/sys@v0.49.0?package-id=e3f7474809ed3c58",
+        "pkg:golang/golang.org/x/term@v0.47.0?package-id=c86ac144e53a7dc8",
         "pkg:golang/gopkg.in/yaml.v3@v3.0.1?package-id=7d8c0f0074cdd4ea",
         "pkg:golang/stdlib@1.27.3?package-id=5de7520d508c216c"
       ]

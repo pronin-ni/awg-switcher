@@ -1,5 +1,7 @@
 proxy:
   http_port: 20171
+# Web UI/admin API listen on 8080 and are not published to the host by default.
+# Set AWG_ADMIN_LISTEN in Compose only when intentionally binding to a trusted interface.
 profiles:
   directory: /app/configs
   primary: primary.conf
@@ -17,6 +19,6 @@ failover:
   switch_cooldown: 30s
 health:
   urls:
-    - https://www.cloudflare.com/cdn-cgi/trace
     - https://api.ipify.org
+    - https://www.cloudflare.com/cdn-cgi/trace
   required_successes: 1

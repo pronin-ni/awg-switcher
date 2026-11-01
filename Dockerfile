@@ -29,6 +29,6 @@ COPY LICENSE THIRD_PARTY_NOTICES.md DEPENDENCIES.md /usr/share/doc/awg-switcher/
 COPY licenses/ /usr/share/licenses/awg-switcher/
 USER 10001:10001
 WORKDIR /app
-EXPOSE 20171
+EXPOSE 20171 8080
 HEALTHCHECK --interval=20s --timeout=5s --start-period=90s --retries=3 CMD ["/usr/local/bin/awg-switcher", "healthcheck"]
 ENTRYPOINT ["/usr/local/bin/awg-switcher"]
