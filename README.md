@@ -14,7 +14,7 @@ AWG Switcher is a single-container HTTP forward proxy with independent WireGuard
 - No proxy authentication is implemented. Attach only trusted clients to the proxy Docker network. Do not publish port `20171` to the internet.
 - `health.urls` must be HTTPS. Any HTTP response (including 403, 429, or 5xx) proves the route reached that endpoint; a site-specific HTTP error is not treated as VPN failure.
 
-Licensing remains **LICENSE REVIEW REQUIRED**. The pinned upstream wireproxy tag is unsigned; the release artifact is hash-pinned and its embedded source revision was checked, but source-to-binary reproducibility and a container-level license/SBOM audit remain open. See [`LICENSE_STATUS.md`](LICENSE_STATUS.md).
+Licensing remains **LICENSE REVIEW REQUIRED**. The pinned upstream wireproxy tag is unsigned; Docker verifies the pinned source commit and compiles from that source with Go 1.27.3 and security-updated Go modules. The image SBOM/license inventory is available, but Trivy cannot identify Go module licenses from the stripped binaries, the x/crypto legacy OpenPGP advisory is reported at module level (not reachable per govulncheck), and the unsigned-tag provenance risk remains. See [`LICENSE_STATUS.md`](LICENSE_STATUS.md).
 
 ## TerraMaster / Portainer layout
 

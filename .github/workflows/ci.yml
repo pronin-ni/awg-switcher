@@ -19,7 +19,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.3'
           cache: true
       - name: Tests, race detector, vet
         run: |
@@ -39,6 +39,8 @@ jobs:
           git clone --quiet --depth 1 --branch v2.1.0 https://github.com/bropines/awg-wireproxy.git "$RUNNER_TEMP/wireproxy"
           test "$(git -C "$RUNNER_TEMP/wireproxy" rev-parse HEAD)" = 02588433b6328171b594d76f3f16bd3404258a83
           cd "$RUNNER_TEMP/wireproxy"
+          go get golang.org/x/net@v0.62.0 golang.org/x/crypto@v0.58.0
+          go run golang.org/x/vuln/cmd/govulncheck@v1.2.0 ./cmd/wireproxy
           go run github.com/google/go-licenses@v1.6.0 check --allowed_licenses=MIT,ISC,Apache-2.0,BSD-3-Clause,GPL-2.0 ./...
           go run github.com/google/go-licenses@v1.6.0 csv ./... | tee "$GITHUB_WORKSPACE/licenses/wireproxy-go-modules.csv"
           python3 - "$GITHUB_WORKSPACE/licenses/wireproxy-go-modules.csv" <<'PY'
