@@ -1243,6 +1243,9 @@ func prepareDataDir(dir string) error {
 		if err := os.Chown(dir, 10001, 10001); err != nil {
 			return fmt.Errorf("initialize data directory ownership: %w", err)
 		}
+		if err := os.Chmod(dir, 0700); err != nil {
+			return fmt.Errorf("secure data directory: %w", err)
+		}
 		if err := syscall.Setgroups([]int{10001}); err != nil {
 			return fmt.Errorf("drop supplementary groups: %w", err)
 		}
@@ -1252,12 +1255,10 @@ func prepareDataDir(dir string) error {
 		if err := syscall.Setuid(10001); err != nil {
 			return fmt.Errorf("drop user privileges: %w", err)
 		}
+		return nil
 	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("create data directory: %w", err)
-	}
-	if err := os.Chmod(dir, 0700); err != nil {
-		return fmt.Errorf("secure data directory: %w", err)
 	}
 	return nil
 }
