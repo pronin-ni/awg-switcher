@@ -427,12 +427,33 @@ func TestPassiveMassProxyFailuresNeedConfirmationAndRouteRecovers(t *testing.T) 
 	s.Failover.Enabled = true
 	s.Failover.CheckTimeout = time.Second
 	s.Failover.TLSHandshakeTimeout = time.Second
-	s.Failover.FailureThreshold = 1
+	s.Failover.FailureThreshold = 2
 	s.Failover.RecoveryThreshold = 2
 	s.Health.RequiredSuccesses = 1
 	s.Health.URLs = []string{origin.URL}
 	c := &Controller{profiles: []*Profile{p}, settings: s}
 	c.active.Store(p)
+	c.noteProxyFailure(p, &SOCKSError{Stage: "socks5_connect", Err: errors.New("connect timeout")})
+	p.mu.Lock()
+	stillHealthy := p.Healthy
+	p.mu.Unlock()
+	if c.active.Load() != p || !stillHealthy {
+		t.Fatal("one passive CONNECT timeout bypassed the configured failure threshold")
+	}
+	c.noteProxyFailure(p, &SOCKSError{Stage: "socks5_connect", Err: errors.New("connect timeout")})
+	firstConfirmationDone := false
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+		p.mu.Lock()
+		firstConfirmationDone = p.Failures >= 1 && !p.confirming
+		p.mu.Unlock()
+		if firstConfirmationDone {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !firstConfirmationDone {
+		t.Fatal("first passive-triggered active confirmation did not complete")
+	}
 	c.noteProxyFailure(p, &SOCKSError{Stage: "socks5_connect", Err: errors.New("connect timeout")})
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
