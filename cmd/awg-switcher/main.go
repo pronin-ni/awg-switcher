@@ -1287,7 +1287,9 @@ func main() {
 			os.Exit(1)
 		}
 		client := http.Client{Timeout: 3 * time.Second}
-		resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/readyz", settings.Proxy.HTTPPort))
+		// Container health means the control plane is alive. An empty install or
+		// failed VPN remains a healthy app process while the proxy itself fails closed.
+		resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/healthz", settings.Proxy.HTTPPort))
 		if err != nil {
 			os.Exit(1)
 		}
