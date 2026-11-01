@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -117,6 +119,96 @@ func TestProfileMetadataPersistsWithoutConfigSecrets(t *testing.T) {
 	if err != nil || len(events) != 1 || events[0].Kind != "switch" {
 		t.Fatalf("event history not restored: events=%+v err=%v", events, err)
 	}
+}
+
+func TestRuntimePriorityOrderAndRestartPersistence(t *testing.T) {
+	dir := t.TempDir()
+	profileDir := filepath.Join(dir, "profiles")
+	if err := os.MkdirAll(profileDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &Controller{profiles: []*Profile{}, ctx: ctx, engine: webTestEngine{}, runtimeDir: filepath.Join(dir, "run"), maxEngines: 8}
+	defer func() {
+		cancel()
+		c.wg.Wait()
+	}()
+	for _, id := range []string{"first", "second", "third"} {
+		path := filepath.Join(profileDir, id+".conf")
+		if err := os.WriteFile(path, []byte(validWG), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.addRuntimeProfile(id, id, []byte(validWG), path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertPriorityOrder := func(profiles []*Profile, want []string) {
+		t.Helper()
+		got := append([]*Profile(nil), profiles...)
+		sort.Slice(got, func(i, j int) bool { return got[i].Priority < got[j].Priority })
+		for i, id := range want {
+			if got[i].ID != id || got[i].Priority != i {
+				t.Fatalf("priority order=%v, want %v (item %d: %+v)", profileIDs(got), want, i, got[i])
+			}
+		}
+	}
+	assertPriorityOrder(c.profilesSnapshot(), []string{"first", "second", "third"})
+	if err := c.setProfilePriority("third", -1); err != nil {
+		t.Fatal(err)
+	}
+	assertPriorityOrder(c.profilesSnapshot(), []string{"third", "first", "second"})
+	if err := c.setProfileEnabled("first", false); err != nil {
+		t.Fatal(err)
+	}
+	web := &webServer{controller: c, dataDir: dir}
+	if err := web.persistState(); err != nil {
+		t.Fatal(err)
+	}
+	var settings Settings
+	settings.Profiles.Directory = filepath.Join(dir, "missing-configs")
+	t.Setenv("AWG_DATA_DIR", dir)
+	disabledAfterRestart, err := discover(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := loadProfileState(dir, disabledAfterRestart); err != nil {
+		t.Fatal(err)
+	}
+	if disabledAfterRestart[1].ID != "first" || disabledAfterRestart[1].enabled {
+		t.Fatalf("disabled profile restore changed priority or enabled state: %+v", disabledAfterRestart[1])
+	}
+	if err := c.setProfileEnabled("first", true); err != nil {
+		t.Fatal(err)
+	}
+	assertPriorityOrder(c.profilesSnapshot(), []string{"third", "first", "second"})
+	if err := web.persistState(); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate process restart: discover persisted files, restore metadata, and
+	// ensure directory/name order cannot replace the user's selected order.
+	restarted, err := discover(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := loadProfileState(dir, restarted); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := profileIDs(restarted), []string{"third", "first", "second"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("restored profile slice order=%v want %v", got, want)
+	}
+	assertPriorityOrder(restarted, []string{"third", "first", "second"})
+	if err := c.removeRuntimeProfile("first"); err != nil {
+		t.Fatal(err)
+	}
+	assertPriorityOrder(c.profilesSnapshot(), []string{"third", "second"})
+}
+
+func profileIDs(profiles []*Profile) []string {
+	ids := make([]string, len(profiles))
+	for i, p := range profiles {
+		ids[i] = p.ID
+	}
+	return ids
 }
 
 func TestDiscoverAllowsEmptyConfigDirectories(t *testing.T) {

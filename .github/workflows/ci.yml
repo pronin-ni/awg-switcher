@@ -29,6 +29,7 @@ jobs:
       - name: Embedded UI syntax and Compose validation
         run: |
           node --check cmd/awg-switcher/web/app.js
+          node --check cmd/awg-switcher/web/setup.js
           docker compose -f docker-compose.yml config --quiet
           docker compose -f docker-compose.yml -f docker-compose.lan.example.yml config --quiet
       - name: Dependency vulnerability scan
@@ -72,6 +73,11 @@ jobs:
         run: mkdir -p dist && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/awg-switcher ./cmd/awg-switcher
       - name: Build container
         run: docker build --platform linux/amd64 -t awg-switcher:ci .
+      - name: Browser smoke test on an empty volume
+        run: |
+          npm install --no-save --no-package-lock playwright@1.55.0
+          npx playwright install --with-deps chromium
+          node tests/browser-smoke.mjs
       - name: Container license inventory
         uses: aquasecurity/trivy-action@v0.36.0
         with:

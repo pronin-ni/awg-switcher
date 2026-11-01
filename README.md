@@ -26,6 +26,18 @@ services:
       - "192.168.31.12:2080:8080"
     volumes:
       - /Volume2/docker/awg-switcher:/app/data
+    read_only: true
+    tmpfs:
+      - /run/awg-switcher:rw,noexec,nosuid,size=16m,uid=10001,gid=10001
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
     networks:
       - proxy-network
 networks:
@@ -37,6 +49,30 @@ networks:
 2. Open the container logs in Portainer, copy the one-time setup code, then open `http://192.168.31.12:2080` and create the administrator. The setup code is invalidated after use.
 3. Upload AWG `.conf` files through the UI. The first uploaded profile becomes primary; later profiles join the automatic failover pool.
 4. Point trusted containers attached to `proxy-network` at `http://awg-switcher:20171`. The proxy port is not published on the NAS host. When stable release validation is complete, change the image tag from `dev` to `latest`.
+
+### TerraMaster TOS 6: diagnose first-start permission failures
+
+No manual ownership or mode changes should be needed. If Portainer logs report `initialize data directory ownership` or `secure data directory`, collect the exact error and inspect the bind mount on TOS over SSH:
+
+```sh
+stat -c 'mode=%a owner=%u:%g path=%n' /Volume2/docker/awg-switcher
+findmnt -T /Volume2/docker/awg-switcher -o TARGET,FSTYPE,OPTIONS
+getfacl -cp /Volume2/docker/awg-switcher
+```
+
+If `getfacl`/`findmnt` is unavailable, inspect that folder in **TOS Control Panel → Privilege → Shared Folder → Access Control** and confirm the Docker service can write there. A filesystem/ACL diagnostic can test the exact container capabilities on a disposable child directory (this is diagnostics only; do not run on the application data files):
+
+```sh
+docker run --rm --cap-drop=ALL --cap-add=CHOWN --cap-add=FOWNER \
+  --cap-add=SETGID --cap-add=SETUID --security-opt no-new-privileges:true \
+  -v /Volume2/docker/awg-switcher:/data alpine:3.22 sh -ec '
+    d=/data/.awg-permission-check; trap "rm -rf \"$d\"" EXIT
+    mkdir "$d" && chown 10001:10001 "$d" && chmod 700 "$d"
+    stat -c "mode=%a owner=%u:%g path=%n" "$d"
+  '
+```
+
+If this probe reports `Operation not permitted`, the shared-folder ACL or filesystem does not allow ownership changes despite the container capability. Keep the data directory on a local TOS filesystem that supports Unix ownership and grant the Docker-managed folder write access using TOS ACL controls; do not switch to privileged mode or weaken container capabilities.
 
 For Docker-only development from a checkout, use `docker-compose.dev.yml`; the Portainer stack above pulls the published development image.
 
@@ -58,6 +94,6 @@ go test -race ./... -count=1
 go vet ./...
 ```
 
-Logs: `docker compose logs -f awg-switcher`. The panel shows profile state and persisted recent switch/engine events. Back up `settings.yaml`, `configs/` and the protected `data/` directory before upgrades. To roll back, restore the previous tested source/image and Compose/settings, then recreate only `awg-switcher`; do not delete `data/`.
+Logs: `docker compose logs -f awg-switcher`. The panel shows profile state and persisted recent switch/engine events. Back up the persistent `/app/data` directory before upgrades. To roll back, restore the previous tested image and Compose, then recreate only `awg-switcher`; do not delete the data directory.
 
 The UI/admin implementation must be treated as development until its live Docker E2E, security review, VPS checks, and license/provenance review are completed. Do not expose admin through NPM/public internet by default.
