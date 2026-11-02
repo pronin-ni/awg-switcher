@@ -33,6 +33,7 @@ jobs:
           node --check cmd/awg-switcher/web/diagnostics.js
           node --check cmd/awg-switcher/web/config-generator.js
           node --check cmd/awg-switcher/web/website-monitor.js
+          node --check cmd/awg-switcher/web/auto-replenishment.js
           docker compose -f docker-compose.yml config --quiet
           docker compose -f docker-compose.yml -f docker-compose.lan.example.yml config --quiet
           docker compose -f generator/docker-compose.yml config --quiet

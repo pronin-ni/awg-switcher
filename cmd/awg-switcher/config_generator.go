@@ -411,58 +411,9 @@ func storeImportedProfile(dataDir string, normalized []byte) (string, string, er
 }
 
 func (c *Controller) testGeneratedProfile(ctx context.Context, source *Profile) (map[string]any, string) {
-	if c.engine == nil {
-		return nil, "engine_unavailable"
-	}
-	temp := &Profile{ID: source.ID + "-probe", Name: "temporary WARP verification", State: "CONNECTING", config: append([]byte(nil), source.config...), enabled: true}
-	c.prepareProfile(temp)
-	session, err := c.engine.Start(ctx, temp.config, temp.socks, temp.slot)
+	result, _, err := c.testGeneratedProfileDetailed(ctx, source, false)
 	if err != nil {
-		return map[string]any{"error_type": "engine_start_failed"}, "engine_start_failed"
-	}
-	defer func() {
-		stopCtx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-		_ = session.Stop(stopCtx)
-		cancel()
-	}()
-	temp.mu.Lock()
-	temp.session = session
-	temp.socks = session.SOCKSAddr()
-	temp.mu.Unlock()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if err := ctx.Err(); err != nil {
-			return map[string]any{"error_type": "timeout"}, "timeout"
-		}
-		select {
-		case <-session.Done():
-			return map[string]any{"error_type": "engine_exited"}, "engine_exited"
-		default:
-		}
-		handshakeCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-		err = c.socksHandshake(handshakeCtx, session.SOCKSAddr())
-		cancel()
-		if err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			return map[string]any{"error_type": "socks_listener_unavailable"}, "socks_listener_unavailable"
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	result := c.checkURL(ctx, temp, "https://api.ipify.org")
-	status, _ := result["http_status"].(int)
-	stages, _ := result["stages"].(map[string]TraceStage)
-	_, socksOK := stages["socks5_connect"]
-	tlsStage, tlsOK := stages["tls_handshake"]
-	failureStage, _ := result["failure_stage"].(string)
-	socksStage := stages["socks5_connect"]
-	if failureStage != "" || !socksOK || socksStage.Status != "success" || !tlsOK || tlsStage.Status != "success" || status < 200 || status >= 300 {
-		reason, _ := result["error_type"].(string)
-		if reason == "" {
-			reason = "https_probe_failed"
-		}
-		return result, reason
+		return result, err.Error()
 	}
 	return result, ""
 }

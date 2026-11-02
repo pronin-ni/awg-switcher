@@ -85,6 +85,21 @@ try {
   page.on('dialog', (dialog) => dialog.accept());
   await page.locator('.rail nav a[href="#website-monitor"]').click();
   await page.locator('#website-monitor').waitFor({ state: 'visible' });
+  await page.locator('#auto-enabled').waitFor();
+  const autoDefaults = await (await page.request.get(`${baseURL}/api/auto-replenishment/settings`)).json();
+  if (autoDefaults.enabled !== false || autoDefaults.minimum_ready !== 2 || autoDefaults.target_ready !== 4) {
+    throw new Error(`unexpected automatic replenishment defaults: ${JSON.stringify(autoDefaults)}`);
+  }
+  await page.locator('#auto-minimum').fill('3');
+  await page.locator('#auto-target').fill('5');
+  await page.locator('.auto-version[value="awg2"]').uncheck();
+  await page.locator('#auto-save').click();
+  await page.waitForFunction(async () => { const s=await (await fetch('/api/auto-replenishment/settings')).json(); return s.enabled===false&&s.minimum_ready===3&&s.target_ready===5&&s.versions.length===2 });
+  const disabledCheckStatus = await page.evaluate(async () => {
+    const csrf = (await (await fetch('/api/session')).json()).csrf;
+    return (await fetch('/api/auto-replenishment/check', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: '{}' })).status;
+  });
+  if (disabledCheckStatus !== 409) throw new Error(`disabled automation allowed a background check: HTTP ${disabledCheckStatus}`);
   await page.locator('[data-template="template-github"]').waitFor();
   await page.locator('#wm-name').fill('Optional test target');
   await page.locator('#wm-url').fill('https://example.com/health');
@@ -125,6 +140,7 @@ try {
   }
   await page.locator('.rail nav a[href="#website-monitor"]').click();
   await page.waitForFunction(async () => { const s=await (await fetch('/api/website-monitor/settings')).json(); return s.enabled===true&&s.schedule.mode==='daily'&&s.schedule.timezone==='Europe/Moscow'&&s.schedule.paused===true&&s.websites.some(w=>w.name==='Optional test target') });
+  await page.waitForFunction(async () => { const s=await (await fetch('/api/auto-replenishment/settings')).json(); return s.enabled===false&&s.minimum_ready===3&&s.target_ready===5&&s.versions.length===2 });
   await page.locator('a[href="#diagnostics"]').click();
   await page.locator('#network-debug').check();
   await page.locator('#debug-state').getByText('активна').waitFor();
@@ -134,7 +150,7 @@ try {
   await page.locator('#download-support').click();
   const report = await downloadPromise;
   if (report.suggestedFilename() !== 'awg-switcher-support.json') throw new Error('unexpected support report filename');
-  console.log('PASS: first-run setup, login, WARP generator, profiles/restart persistence, website-monitor selection/schedule/restart persistence, Network Debug and support report');
+  console.log('PASS: first-run setup, login, WARP generator, profiles/restart persistence, automatic replenishment defaults/settings/restart persistence, website-monitor selection/schedule/restart persistence, Network Debug and support report');
 } finally {
   await browser?.close();
   try { docker('rm', '-f', name); } catch {}
