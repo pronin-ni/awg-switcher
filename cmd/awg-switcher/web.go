@@ -60,6 +60,7 @@ type webServer struct {
 	autoWake        chan struct{}
 	autoRunMu       sync.Mutex
 	autoRunFunc     func(context.Context, configGeneratorSettings, string, int) (generatedConfigResponse, error)
+	autoVerifyFunc  func(context.Context, *Profile, bool) ([]WebsiteCheckResult, error)
 	autoCancel      context.CancelFunc
 }
 

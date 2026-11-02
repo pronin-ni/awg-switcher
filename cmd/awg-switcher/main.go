@@ -177,6 +177,7 @@ type Controller struct {
 	websiteResolver     func(context.Context, string) ([]net.IP, error)
 	websiteTLSConfig    *tls.Config
 	generatedIPCheckURL string
+	generatedTLSConfig  *tls.Config // test-only trust hook for isolated generated-profile probes
 }
 
 func defaults(s *Settings) {
@@ -1296,7 +1297,11 @@ func (c *Controller) checkURL(ctx context.Context, p *Profile, rawURL string) ma
 		},
 	}
 	probeCtx = httptrace.WithClientTrace(probeCtx, clientTrace)
-	transport := &http.Transport{DialContext: func(x context.Context, n, a string) (net.Conn, error) {
+	tlsConfig := c.generatedTLSConfig
+	if tlsConfig != nil {
+		tlsConfig = tlsConfig.Clone()
+	}
+	transport := &http.Transport{TLSClientConfig: tlsConfig, DialContext: func(x context.Context, n, a string) (net.Conn, error) {
 		return c.socksDialAt(x, session.SOCKSAddr(), a)
 	}, TLSHandshakeTimeout: c.settings.Failover.TLSHandshakeTimeout, ResponseHeaderTimeout: c.settings.Failover.ResponseHeaderTimeout, DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
