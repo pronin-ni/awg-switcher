@@ -525,37 +525,13 @@ func isPublicIP(ip net.IP) bool {
 	return true
 }
 
-func resolvePublicHost(ctx context.Context, host string) ([]net.IP, error) {
-	if ip := net.ParseIP(host); ip != nil {
-		if !isPublicIP(ip) {
-			return nil, errors.New("destination is not a public address")
-		}
-		return []net.IP{ip}, nil
-	}
-	ipList, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return nil, fmt.Errorf("DNS lookup failed: %w", err)
-	}
-	if len(ipList) == 0 {
-		return nil, errors.New("DNS returned no addresses")
-	}
-	result := make([]net.IP, 0, len(ipList))
-	for _, item := range ipList {
-		if !isPublicIP(item.IP) {
-			return nil, errors.New("hostname resolves to a non-public address")
-		}
-		result = append(result, item.IP)
-	}
-	return result, nil
-}
-
-func (c *Controller) resolveWebsiteHost(ctx context.Context, host string) ([]net.IP, error) {
+func (c *Controller) resolveWebsiteHost(ctx context.Context, p *Profile, host string) ([]net.IP, error) {
 	var addresses []net.IP
 	var err error
 	if c.websiteResolver != nil {
 		addresses, err = c.websiteResolver(ctx, host)
 	} else {
-		addresses, err = resolvePublicHost(ctx, host)
+		addresses, err = c.resolveWebsiteHostThroughProfile(ctx, p, host)
 	}
 	if err != nil {
 		return nil, err
@@ -569,6 +545,90 @@ func (c *Controller) resolveWebsiteHost(ctx context.Context, host string) ([]net
 		}
 	}
 	return addresses, nil
+}
+
+// resolveWebsiteHostThroughProfile keeps destination DNS queries inside the
+// selected VPN route. The system resolver is intentionally not used for the
+// website being measured; only the DoH endpoint hostname is resolved by the
+// remote SOCKS engine.
+func (c *Controller) resolveWebsiteHostThroughProfile(ctx context.Context, p *Profile, host string) ([]net.IP, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		if !isPublicIP(ip) {
+			return nil, errors.New("destination is not a public address")
+		}
+		return []net.IP{ip}, nil
+	}
+	p.mu.Lock()
+	session := p.session
+	p.mu.Unlock()
+	if session == nil {
+		return nil, errors.New("VPN engine is not running")
+	}
+	endpoint := c.websiteDNSURL
+	if endpoint == "" {
+		endpoint = "https://cloudflare-dns.com/dns-query"
+	}
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	if c.websiteTLSConfig != nil {
+		tlsConfig = c.websiteTLSConfig.Clone()
+		if tlsConfig.MinVersion == 0 {
+			tlsConfig.MinVersion = tls.VersionTLS12
+		}
+	}
+	transport := &http.Transport{TLSClientConfig: tlsConfig, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 5 * time.Second, DisableKeepAlives: true, DialContext: func(dctx context.Context, network, address string) (net.Conn, error) {
+		return c.socksDialAt(dctx, session.SOCKSAddr(), address)
+	}}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: 8 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	var out []net.IP
+	for _, qtype := range []string{"A", "AAAA"} {
+		u, err := url.Parse(endpoint)
+		if err != nil {
+			return nil, errors.New("DNS-over-HTTPS endpoint is invalid")
+		}
+		q := u.Query()
+		q.Set("name", host)
+		q.Set("type", qtype)
+		u.RawQuery = q.Encode()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+		if err != nil {
+			return nil, errors.New("DNS-over-HTTPS request failed")
+		}
+		req.Header.Set("Accept", "application/dns-json")
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("DNS-over-HTTPS failed through VPN: %w", err)
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		_ = resp.Body.Close()
+		if readErr != nil || resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("DNS-over-HTTPS returned HTTP %d", resp.StatusCode)
+		}
+		var answer struct {
+			Status  int `json:"Status"`
+			Answers []struct {
+				Type int    `json:"type"`
+				Data string `json:"data"`
+			} `json:"Answer"`
+		}
+		if json.Unmarshal(body, &answer) != nil || answer.Status != 0 {
+			return nil, errors.New("DNS-over-HTTPS returned an invalid DNS response")
+		}
+		for _, record := range answer.Answers {
+			if record.Type != 1 && record.Type != 28 {
+				continue
+			}
+			ip := net.ParseIP(record.Data)
+			if ip == nil {
+				return nil, errors.New("DNS-over-HTTPS returned an invalid address")
+			}
+			out = append(out, ip)
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("DNS-over-HTTPS returned no addresses")
+	}
+	return out, nil
 }
 
 func sanitizedWebsiteURL(raw string) string {
@@ -600,7 +660,7 @@ func (c *Controller) probeWebsite(ctx context.Context, p *Profile, w Website, ti
 			out.Error = "redirect must target public HTTPS without credentials"
 			break
 		}
-		ips, resolveErr := c.resolveWebsiteHost(ctx, current.Hostname())
+		ips, resolveErr := c.resolveWebsiteHost(ctx, p, current.Hostname())
 		if resolveErr != nil {
 			out.Error = resolveErr.Error()
 			if strings.Contains(out.Error, "DNS") {

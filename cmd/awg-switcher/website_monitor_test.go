@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,12 +82,68 @@ func TestWebsiteProbeUsesSOCKSAndConfigured403Status(t *testing.T) {
 	}
 }
 
+func TestWebsiteDNSQueriesUseEncryptedDoHThroughProfileSOCKS(t *testing.T) {
+	var queries atomic.Int32
+	origin := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries.Add(1)
+		if r.Header.Get("Accept") != "application/dns-json" {
+			t.Errorf("DoH Accept=%q", r.Header.Get("Accept"))
+		}
+		w.Header().Set("Content-Type", "application/dns-json")
+		if r.URL.Query().Get("name") != "sensitive.example.test" {
+			t.Errorf("unexpected queried hostname: %q", r.URL.Query().Get("name"))
+		}
+		if r.URL.Query().Get("type") == "A" {
+			_, _ = io.WriteString(w, `{"Status":0,"Answer":[{"type":1,"data":"8.8.8.8"}]}`)
+		} else {
+			_, _ = io.WriteString(w, `{"Status":0,"Answer":[{"type":28,"data":"2606:4700:4700::1111"}]}`)
+		}
+	}))
+	defer origin.Close()
+	socks := newTestSocks(t, strings.TrimPrefix(origin.URL, "https://"))
+	roots := x509.NewCertPool()
+	roots.AddCert(origin.Certificate())
+	c := &Controller{websiteDNSURL: origin.URL + "/dns-query", websiteTLSConfig: &tls.Config{RootCAs: roots}, settings: Settings{}}
+	p := &Profile{ID: "vpn", session: &testSession{addr: socks.Addr()}}
+	ips, err := c.resolveWebsiteHostThroughProfile(context.Background(), p, "sensitive.example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queries.Load() != 2 || len(ips) != 2 || !isPublicIP(ips[0]) || !isPublicIP(ips[1]) {
+		t.Fatalf("DoH results queries=%d ips=%v", queries.Load(), ips)
+	}
+	select {
+	case <-socks.hosts:
+	default:
+		t.Fatal("DNS-over-HTTPS never traversed the selected profile SOCKS transport")
+	}
+}
+
+func TestWebsiteResolverAcceptsPublicIPLiteralButRejectsPrivateLiteral(t *testing.T) {
+	c := &Controller{}
+	got, err := c.resolveWebsiteHostThroughProfile(context.Background(), nil, "8.8.8.8")
+	if err != nil || len(got) != 1 || !got[0].Equal(net.ParseIP("8.8.8.8")) {
+		t.Fatalf("public IP literal resolution=%v err=%v", got, err)
+	}
+	if _, err = c.resolveWebsiteHostThroughProfile(context.Background(), nil, "169.254.169.254"); err == nil || !strings.Contains(err.Error(), "not a public address") {
+		t.Fatalf("private IP literal was accepted: %v", err)
+	}
+}
+
 func TestWebsitePolicyFailureFailoverAndRecovery(t *testing.T) {
 	var primaryStatus atomic.Int32
 	primaryStatus.Store(http.StatusInternalServerError)
-	primaryServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(int(primaryStatus.Load())) }))
+	primaryServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Test-Route", "primary")
+		w.WriteHeader(int(primaryStatus.Load()))
+	}))
 	defer primaryServer.Close()
-	backupServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	var backupStatus atomic.Int32
+	backupStatus.Store(http.StatusOK)
+	backupServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Test-Route", "backup")
+		w.WriteHeader(int(backupStatus.Load()))
+	}))
 	defer backupServer.Close()
 	primarySocks := newTestSocks(t, strings.TrimPrefix(primaryServer.URL, "https://"))
 	backupSocks := newTestSocks(t, strings.TrimPrefix(backupServer.URL, "https://"))
@@ -96,11 +155,17 @@ func TestWebsitePolicyFailureFailoverAndRecovery(t *testing.T) {
 	settings.Failover.FailureThreshold = 2
 	settings.Failover.RecoveryThreshold = 3
 	settings.Health.RequiredSuccesses = 1
-	primary := &Profile{ID: "primary", Name: "primary", Priority: 0, State: "HEALTHY", Healthy: true, enabled: true, RoutingEligible: true, WebsiteState: "PASSED", session: &testSession{addr: primarySocks.Addr()}}
-	backup := &Profile{ID: "backup", Name: "backup", Priority: 1, State: "HEALTHY", Healthy: true, enabled: true, RoutingEligible: true, WebsiteState: "PASSED", session: &testSession{addr: backupSocks.Addr()}}
+	primary := &Profile{ID: "primary", Name: "primary", Priority: 0, State: "HEALTHY", Healthy: true, enabled: true, socks: primarySocks.Addr(), RoutingEligible: true, WebsiteState: "PASSED", session: &testSession{addr: primarySocks.Addr()}}
+	backup := &Profile{ID: "backup", Name: "backup", Priority: 1, State: "HEALTHY", Healthy: true, enabled: true, socks: backupSocks.Addr(), RoutingEligible: true, WebsiteState: "PASSED", session: &testSession{addr: backupSocks.Addr()}}
 	c := &Controller{profiles: []*Profile{primary, backup}, settings: settings, websiteResolver: func(context.Context, string) ([]net.IP, error) { return []net.IP{net.ParseIP("8.8.8.8")}, nil }, websiteTLSConfig: &tls.Config{RootCAs: roots}}
 	c.websiteConfig = WebsiteMonitorConfig{Enabled: true, Websites: []Website{{ID: "mandatory", Name: "required site", URL: "https://example.com/", Enabled: true, Required: true, Statuses: []int{200}}}, TimeoutSeconds: 2, FailureThreshold: 2, RecoveryThreshold: 3, Policy: "all_required", Schedule: WebsiteSchedule{Mode: "every", Minutes: 30, Timezone: "UTC"}}
 	c.active.Store(primary)
+	proxy := httptest.NewServer(c.proxyHandler())
+	defer proxy.Close()
+	proxyURL, _ := url.Parse(proxy.URL)
+	proxyTransport := &http.Transport{Proxy: http.ProxyURL(proxyURL), TLSClientConfig: &tls.Config{RootCAs: roots}, DisableKeepAlives: true}
+	proxyClient := &http.Client{Transport: proxyTransport}
+	defer proxyTransport.CloseIdleConnections()
 	cycle := func() {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -120,6 +185,14 @@ func TestWebsitePolicyFailureFailoverAndRecovery(t *testing.T) {
 	if c.active.Load() != backup {
 		t.Fatalf("failed profile did not fail over to eligible backup: active=%v", c.active.Load())
 	}
+	resp, err := proxyClient.Get("https://example.com/check")
+	if err != nil {
+		t.Fatalf("HTTPS CONNECT request after website failover: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("X-Test-Route") != "backup" {
+		t.Fatalf("HTTP CONNECT did not use backup route: status=%d route=%q", resp.StatusCode, resp.Header.Get("X-Test-Route"))
+	}
 	primaryStatus.Store(http.StatusOK)
 	cycle()
 	if primary.WebsiteState != "PENDING" || primary.RoutingEligible || c.active.Load() != backup {
@@ -133,6 +206,35 @@ func TestWebsitePolicyFailureFailoverAndRecovery(t *testing.T) {
 	if primary.WebsiteState != "PASSED" || !primary.RoutingEligible || c.active.Load() != primary {
 		t.Fatalf("website recovery did not restore route: state=%s eligible=%v active=%v", primary.WebsiteState, primary.RoutingEligible, c.active.Load())
 	}
+	resp, err = proxyClient.Get("https://example.com/check")
+	if err != nil {
+		t.Fatalf("HTTPS CONNECT request after recovery: %v", err)
+	}
+	resp.Body.Close()
+	if resp.Header.Get("X-Test-Route") != "primary" {
+		t.Fatalf("recovered primary did not regain its original priority: route=%q", resp.Header.Get("X-Test-Route"))
+	}
+	primaryStatus.Store(http.StatusInternalServerError)
+	backupStatus.Store(http.StatusInternalServerError)
+	cycle()
+	cycle()
+	if c.active.Load() != nil {
+		t.Fatalf("all website-policy routes failed but active route remains %v", c.active.Load())
+	}
+	conn, err := net.Dial("tcp", proxy.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_, _ = io.WriteString(conn, "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")
+	statusLine, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		t.Fatalf("reading fail-closed CONNECT response: %v", err)
+	}
+	if !strings.Contains(statusLine, "503") {
+		t.Fatalf("all website-blocked CONNECT response=%q", statusLine)
+	}
+	_ = c.websiteStatusResponse() // control-plane status remains available with no eligible VPN route.
 }
 
 func TestWebsiteDNSFailureAndTimeoutAreNotConnectivityFailures(t *testing.T) {

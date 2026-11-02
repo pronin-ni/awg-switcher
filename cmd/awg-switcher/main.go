@@ -176,6 +176,7 @@ type Controller struct {
 	onWebsiteState      func()
 	websiteResolver     func(context.Context, string) ([]net.IP, error)
 	websiteTLSConfig    *tls.Config
+	websiteDNSURL       string // test hook; production uses DNS-over-HTTPS through the profile SOCKS tunnel
 	generatedIPCheckURL string
 	generatedTLSConfig  *tls.Config // test-only trust hook for isolated generated-profile probes
 }

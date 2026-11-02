@@ -209,6 +209,19 @@ func saveAutoReplenishmentState(dir string, state AutoReplenishmentState) error 
 	}
 	return atomicPrivateWrite(dir, autoReplenishmentStatePath(dir), b)
 }
+
+func (s *webServer) persistAutoReplenishmentState() error {
+	// Serialize snapshot+rename, not just the write: concurrent event writers
+	// must never persist an older state after a newer state.
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+	s.autoMu.RLock()
+	state := s.autoState
+	state.Attempts = append([]time.Time(nil), s.autoState.Attempts...)
+	state.Events = append([]AutoReplenishmentEvent(nil), s.autoState.Events...)
+	s.autoMu.RUnlock()
+	return saveAutoReplenishmentState(s.dataDir, state)
+}
 func atomicPrivateWrite(dir, path string, b []byte) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
@@ -256,9 +269,8 @@ func (s *webServer) appendAutoEvent(kind, message string, created, passed, added
 	if len(s.autoState.Events) > autoReplenishmentMaxEvents {
 		s.autoState.Events = append([]AutoReplenishmentEvent(nil), s.autoState.Events[len(s.autoState.Events)-autoReplenishmentMaxEvents:]...)
 	}
-	snapshot := s.autoState
 	s.autoMu.Unlock()
-	if err := saveAutoReplenishmentState(s.dataDir, snapshot); err != nil {
+	if err := s.persistAutoReplenishmentState(); err != nil {
 		slogWarnAuto("state persistence failed")
 	}
 }
@@ -394,6 +406,9 @@ func (s *webServer) runAutoReplenishment(ctx context.Context) error {
 }
 
 func (s *webServer) runAutoReplenishmentLocked(ctx context.Context, cfg AutoReplenishmentConfig) error {
+	if !s.autoConfigSnapshot().Enabled {
+		return nil
+	}
 	s.autoMu.Lock()
 	s.autoTaskRunning = true
 	runCtx, cancelRun := context.WithCancel(ctx)
@@ -405,7 +420,11 @@ func (s *webServer) runAutoReplenishmentLocked(ctx context.Context, cfg AutoRepl
 		return errors.New("generator is busy")
 	}
 	defer s.configGenRun.Unlock()
-	if err := s.recoverAutoCandidates(ctx, cfg); err != nil {
+	if err := s.recoverAutoCandidates(runCtx, cfg); err != nil {
+		if runCtx.Err() != nil || !s.autoConfigSnapshot().Enabled {
+			s.finishAutoRun("cancelled", "Automatic replenishment was disabled during candidate recovery.", 0, 0, 0, false, 0)
+			return nil
+		}
 		s.finishAutoRun("error", "A persisted candidate could not be re-verified.", 0, 0, 0, true, 0)
 		return err
 	}
@@ -449,9 +468,8 @@ func (s *webServer) runAutoReplenishmentLocked(ctx context.Context, cfg AutoRepl
 	s.autoState.LastRun = now.UTC()
 	s.autoState.LastRunStatus = "running"
 	s.autoState.LastRunError = ""
-	snapshot := s.autoState
 	s.autoMu.Unlock()
-	_ = saveAutoReplenishmentState(s.dataDir, snapshot)
+	_ = s.persistAutoReplenishmentState()
 	s.appendAutoEvent("started", fmt.Sprintf("Automatic generation started; ready=%d, target=%d.", ready, cfg.TargetReady), 0, 0, 0)
 	settings, err := s.generatorSettings()
 	if err != nil {
@@ -495,10 +513,16 @@ func (s *webServer) runAutoReplenishmentLocked(ctx context.Context, cfg AutoRepl
 		s.finishAutoRun("unavailable", "The configuration generator did not return usable profiles.", 0, 0, 0, true, retry)
 		return err
 	}
+	// Settings can be switched off while a slow generator request is in flight.
+	// Do not persist/launch any returned profiles after that opt-out.
+	if runCtx.Err() != nil || !s.autoConfigSnapshot().Enabled {
+		s.finishAutoRun("cancelled", "Automatic replenishment was disabled before candidates were accepted.", 0, 0, 0, false, 0)
+		return nil
+	}
 	created, passed, added := 0, 0, 0
 	seen := s.profileConfigHashes()
 	for i, item := range result.Configs {
-		if err := deadline.Err(); err != nil {
+		if err := deadline.Err(); err != nil || runCtx.Err() != nil || !s.autoConfigSnapshot().Enabled {
 			break
 		}
 		if created >= byRun {
@@ -560,6 +584,11 @@ func (s *webServer) runAutoReplenishmentLocked(ctx context.Context, cfg AutoRepl
 		passed++
 		s.appendAutoEvent("candidate_passed", "Generated candidate passed real HTTPS verification.", 1, 1, 0)
 		if cfg.AutoActivate {
+			if runCtx.Err() != nil || !s.autoConfigSnapshot().Enabled {
+				s.appendAutoEvent("activation_skipped", "Verified candidate remains disabled because automatic replenishment was turned off.", 0, 1, 0)
+				_ = s.persistState()
+				continue
+			}
 			if !s.activateAutoCandidate(p) {
 				s.appendAutoEvent("candidate_failed", "Verified profile could not be enabled.", 1, 1, 0)
 				continue
@@ -593,6 +622,11 @@ func enabledWebsiteList(cfg WebsiteMonitorConfig) []Website {
 }
 
 func (s *webServer) verifyAutoCandidate(ctx context.Context, p *Profile, cfg AutoReplenishmentConfig) error {
+	websiteConfig := s.controller.websiteConfigSnapshot()
+	policyHash := websitePolicyHash(websiteConfig)
+	p.mu.Lock()
+	configHash := sha256.Sum256(p.config)
+	p.mu.Unlock()
 	var results []WebsiteCheckResult
 	var err error
 	if s.autoVerifyFunc != nil {
@@ -612,11 +646,21 @@ func (s *webServer) verifyAutoCandidate(ctx context.Context, p *Profile, cfg Aut
 	if err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if policyHash != websitePolicyHash(s.controller.websiteConfigSnapshot()) {
+		return errors.New("website policy changed during candidate verification; retry required")
+	}
 	p.mu.Lock()
+	if sha256.Sum256(p.config) != configHash {
+		p.mu.Unlock()
+		return errors.New("candidate configuration changed during verification; retry required")
+	}
 	p.AutoVerified = true
 	p.AutoVerifyReason = ""
 	p.WebsiteLastCheck = time.Now().UTC()
-	if websitePolicyApplies(s.controller.websiteConfigSnapshot()) && cfg.UseWebsiteMonitor {
+	if websitePolicyApplies(websiteConfig) && cfg.UseWebsiteMonitor {
 		p.WebsiteState = "PASSED"
 		p.RoutingEligible = true
 	}
@@ -625,7 +669,20 @@ func (s *webServer) verifyAutoCandidate(ctx context.Context, p *Profile, cfg Aut
 }
 
 func (s *webServer) activateAutoCandidate(p *Profile) bool {
+	s.controller.dynamicMu.Lock()
+	defer s.controller.dynamicMu.Unlock()
+	if s.controller.findProfile(p.ID) != p {
+		return false
+	}
 	p.mu.Lock()
+	if !p.AutoGenerated || !p.AutoCandidate || !p.AutoVerified {
+		p.mu.Unlock()
+		return false
+	}
+	if websitePolicyApplies(s.controller.websiteConfigSnapshot()) && (!p.RoutingEligible || p.WebsiteState != "PASSED") {
+		p.mu.Unlock()
+		return false
+	}
 	shouldLaunch := !p.enabled
 	if shouldLaunch {
 		p.enabled = true
@@ -662,6 +719,13 @@ func (s *webServer) recoverAutoCandidates(ctx context.Context, cfg AutoReplenish
 		}
 		s.appendAutoEvent("candidate_passed", "Recovered candidate passed real HTTPS verification.", 0, 1, 0)
 		if cfg.AutoActivate {
+			if ctx.Err() != nil || !s.autoConfigSnapshot().Enabled {
+				s.appendAutoEvent("activation_skipped", "Recovered candidate remains disabled because automatic replenishment was turned off.", 0, 1, 0)
+				if err := s.persistState(); err != nil {
+					return err
+				}
+				continue
+			}
 			if s.activateAutoCandidate(p) {
 				s.appendAutoEvent("candidate_activated", "Recovered verified candidate added to the reserve pool.", 0, 1, 1)
 			} else {
@@ -722,9 +786,8 @@ func (s *webServer) finishAutoRun(status, message string, created, passed, added
 	s.autoState.LastCreated = created
 	s.autoState.LastPassed = passed
 	s.autoState.LastAdded = added
-	snapshot := s.autoState
 	s.autoMu.Unlock()
-	_ = saveAutoReplenishmentState(s.dataDir, snapshot)
+	_ = s.persistAutoReplenishmentState()
 	s.appendAutoEvent(status, message, created, passed, added)
 }
 

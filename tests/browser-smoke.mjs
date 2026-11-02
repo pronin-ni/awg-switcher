@@ -47,6 +47,13 @@ try {
   await page.locator('#password').fill(password);
   await page.locator('#login-form button').click();
   await page.locator('#dashboard').waitFor({ state: 'visible' });
+  await page.locator('#theme').click();
+  if (!['dark', 'light'].includes(await page.locator('html').getAttribute('data-theme'))) throw new Error('theme toggle did not apply a light/dark theme');
+  await page.locator('#language').click();
+  if (!(await page.locator('.rail nav a[href="#website-monitor"]').textContent()).toLowerCase().includes('website')) throw new Error('English navigation translation did not apply');
+  await page.locator('#language').click();
+  if (!(await page.locator('.rail nav a[href="#website-monitor"]').textContent()).includes('Проверки сайтов')) throw new Error('Russian navigation translation did not restore');
+  await page.locator('#theme').click();
   await page.locator('.rail nav a[href="#dashboard"]').click();
   await page.locator('#dashboard').waitFor({ state: 'visible' });
 
@@ -112,9 +119,16 @@ try {
   await page.locator('#wm-save').click();
   await page.waitForFunction(async () => (await (await fetch('/api/website-monitor/settings')).json()).enabled === true);
   await page.locator('#wm-mode').selectOption('daily');
+  await page.locator('#wm-daily-wrap').waitFor({ state: 'visible' });
   await page.locator('#wm-daily-at').fill('09:00');
   await page.locator('#wm-timezone').fill('Europe/Moscow');
   await page.locator('#wm-paused').check();
+  await page.waitForTimeout(5500);
+  const unsavedMode = await page.locator('#wm-mode').inputValue();
+  const unsavedPaused = await page.locator('#wm-paused').isChecked();
+  if (unsavedMode !== 'daily' || !unsavedPaused) {
+    throw new Error(`website-monitor refresh overwrote unsaved schedule edits: mode=${unsavedMode} paused=${unsavedPaused}`);
+  }
   await page.locator('#wm-save').click();
   await page.waitForFunction(async () => { const s=await (await fetch('/api/website-monitor/settings')).json(); return s.schedule.mode==='daily'&&s.schedule.timezone==='Europe/Moscow'&&s.schedule.paused===true });
   await page.locator('#logout').click();
