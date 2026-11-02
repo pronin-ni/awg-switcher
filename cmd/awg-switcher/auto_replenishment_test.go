@@ -231,6 +231,27 @@ func TestAutoReplenishmentAllDownIsBoundedAndCanBeDisabled(t *testing.T) {
 			t.Fatal("generator called while outage generation was disabled")
 		}
 	})
+	t.Run("outage switch is independent from reserve switch", func(t *testing.T) {
+		s := newAutoTestServer(t)
+		s.autoConfig = defaultAutoReplenishmentConfig()
+		s.autoConfig.Enabled = true
+		s.autoConfig.GenerateBelowMinimum = false
+		s.autoConfig.GenerateWhenAllDown = true
+		if err := s.saveGeneratorSettings(configGeneratorSettings{URL: "http://awg-config-gen:3000"}); err != nil {
+			t.Fatal(err)
+		}
+		var calls atomic.Int32
+		s.autoRunFunc = func(context.Context, configGeneratorSettings, string, int) (generatedConfigResponse, error) {
+			calls.Add(1)
+			return generatedConfigResponse{}, nil
+		}
+		if err := s.runAutoReplenishment(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if calls.Load() != 1 {
+			t.Fatalf("all-down option did not override low-reserve toggle: calls=%d", calls.Load())
+		}
+	})
 }
 
 func TestAutoReplenishmentFailedCandidatePersistsDisabledWithReason(t *testing.T) {

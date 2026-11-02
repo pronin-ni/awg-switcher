@@ -414,11 +414,12 @@ func (s *webServer) runAutoReplenishmentLocked(ctx context.Context, cfg AutoRepl
 		return nil
 	}
 	s.appendAutoEvent("shortage", fmt.Sprintf("Only %d of %d minimum routing-eligible profiles are ready.", ready, cfg.MinimumReady), 0, 0, 0)
-	if ready == 0 && !cfg.GenerateWhenAllDown {
-		s.finishAutoRun("deferred", "All profiles are unavailable; automatic generation on total outage is disabled.", 0, 0, 0, false, 0)
-		return nil
-	}
-	if !cfg.GenerateBelowMinimum {
+	if ready == 0 {
+		if !cfg.GenerateWhenAllDown {
+			s.finishAutoRun("deferred", "All profiles are unavailable; automatic generation on total outage is disabled.", 0, 0, 0, false, 0)
+			return nil
+		}
+	} else if !cfg.GenerateBelowMinimum {
 		s.finishAutoRun("deferred", "Automatic generation below the configured minimum is disabled.", 0, 0, 0, false, 0)
 		return nil
 	}
