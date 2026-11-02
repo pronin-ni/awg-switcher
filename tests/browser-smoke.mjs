@@ -91,6 +91,8 @@ try {
     throw new Error(`unexpected automatic replenishment defaults: ${JSON.stringify(autoDefaults)}`);
   }
   await page.locator('#auto-minimum').fill('3');
+  await page.waitForTimeout(5500);
+  if ((await page.locator('#auto-minimum').inputValue()) !== '3') throw new Error('automatic settings refresh overwrote an unsaved UI edit');
   await page.locator('#auto-target').fill('5');
   await page.locator('.auto-version[value="awg2"]').uncheck();
   await page.locator('#auto-save').click();
