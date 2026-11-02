@@ -57,41 +57,50 @@ type Settings struct {
 }
 
 type Profile struct {
-	Name            string    `json:"name"`
-	ID              string    `json:"id"`
-	Priority        int       `json:"priority"`
-	State           string    `json:"state"`
-	Healthy         bool      `json:"healthy"`
-	ServiceHealthy  bool      `json:"service_healthy"`
-	ConnectivityOK  bool      `json:"connectivity_healthy"`
-	Availability24H float64   `json:"availability_24h"`
-	Availability7D  float64   `json:"availability_7d"`
-	Service24H      float64   `json:"service_health_24h"`
-	Service7D       float64   `json:"service_health_7d"`
-	LastError       string    `json:"last_error,omitempty"`
-	LastCheck       time.Time `json:"last_check,omitempty"`
-	LastSuccess     time.Time `json:"last_success,omitempty"`
-	HealthLatencyMS int64     `json:"health_latency_ms,omitempty"`
-	ExternalIP      string    `json:"external_ip,omitempty"`
-	Failures        int       `json:"failures"`
-	Successes       int       `json:"successes"`
-	Restarts        int       `json:"restarts"`
-	path            string
-	config          []byte
-	socks           string
-	session         EngineSession
-	restartReq      chan struct{}
-	restartTimes    []time.Time
-	transport       *http.Transport
-	mu              sync.Mutex
-	slot            int
-	enabled         bool
-	cancel          context.CancelFunc
-	done            chan struct{}
-	configRevision  uint64
-	passiveFailures int
-	confirming      bool
-	healthySince    time.Time
+	Name                   string    `json:"name"`
+	ID                     string    `json:"id"`
+	Priority               int       `json:"priority"`
+	State                  string    `json:"state"`
+	Healthy                bool      `json:"healthy"`
+	ServiceHealthy         bool      `json:"service_healthy"`
+	ConnectivityOK         bool      `json:"connectivity_healthy"`
+	Availability24H        float64   `json:"availability_24h"`
+	Availability7D         float64   `json:"availability_7d"`
+	Service24H             float64   `json:"service_health_24h"`
+	Service7D              float64   `json:"service_health_7d"`
+	LastError              string    `json:"last_error,omitempty"`
+	LastCheck              time.Time `json:"last_check,omitempty"`
+	LastSuccess            time.Time `json:"last_success,omitempty"`
+	HealthLatencyMS        int64     `json:"health_latency_ms,omitempty"`
+	ExternalIP             string    `json:"external_ip,omitempty"`
+	Failures               int       `json:"failures"`
+	Successes              int       `json:"successes"`
+	Restarts               int       `json:"restarts"`
+	path                   string
+	config                 []byte
+	socks                  string
+	session                EngineSession
+	restartReq             chan struct{}
+	restartTimes           []time.Time
+	transport              *http.Transport
+	mu                     sync.Mutex
+	slot                   int
+	enabled                bool
+	cancel                 context.CancelFunc
+	done                   chan struct{}
+	configRevision         uint64
+	passiveFailures        int
+	confirming             bool
+	healthySince           time.Time
+	WebsiteState           string    `json:"website_health"`
+	WebsiteReason          string    `json:"website_reason,omitempty"`
+	RoutingEligible        bool      `json:"routing_eligible"`
+	WebsiteLastCheck       time.Time `json:"website_last_check,omitempty"`
+	websiteFailures        map[string]int
+	websiteSuccesses       map[string]int
+	websiteFailureCycles   int
+	websiteSuccessCycles   int
+	websiteRecoveryPending bool
 }
 type HealthSample struct {
 	At             time.Time `json:"at"`
@@ -110,6 +119,7 @@ type Snapshot struct {
 	ActiveConnections      int64             `json:"active_connections"`
 	MinimumHealthyProfiles int               `json:"minimum_healthy_profiles"`
 	FailureDomainNote      string            `json:"failure_domain_note"`
+	WebsiteMonitorEnabled  bool              `json:"website_monitor_enabled"`
 	Events                 []ControllerEvent `json:"events"`
 }
 type ControllerEvent struct {
@@ -135,6 +145,7 @@ type Controller struct {
 	wg                 sync.WaitGroup
 	ctx                context.Context
 	manualUntil        time.Time
+	manualProfile      *Profile
 	eventsMu           sync.Mutex
 	events             []ControllerEvent
 	onEvent            func()
@@ -146,6 +157,21 @@ type Controller struct {
 	healthHistory      []HealthSample
 	healthStatsUpdated map[string]time.Time
 	healthPrunedAt     time.Time
+	websiteMu          sync.RWMutex
+	websiteConfig      WebsiteMonitorConfig
+	websiteStatuses    map[string]WebsiteProfileStatus
+	websiteHistory     []WebsiteCheckResult
+	websiteRunning     bool
+	websitePaused      bool
+	websiteNextCheck   time.Time
+	websiteLastCheck   time.Time
+	websiteLastError   string
+	websiteRunMu       sync.Mutex
+	websiteDataDir     string
+	websiteWake        chan struct{}
+	onWebsiteState     func()
+	websiteResolver    func(context.Context, string) ([]net.IP, error)
+	websiteTLSConfig   *tls.Config
 }
 
 func defaults(s *Settings) {
@@ -650,6 +676,7 @@ func (c *Controller) setProfileEnabled(id string, enabled bool) error {
 	if p == nil {
 		return errors.New("profile not found")
 	}
+	websitePolicy := websitePolicyApplies(c.websiteConfigSnapshot())
 	p.mu.Lock()
 	if p.enabled == enabled {
 		p.mu.Unlock()
@@ -663,6 +690,17 @@ func (c *Controller) setProfileEnabled(id string, enabled bool) error {
 		p.ServiceHealthy = false
 		p.State = "DISABLED"
 		p.LastError = ""
+		p.RoutingEligible = false
+		p.WebsiteState = "DISABLED"
+	} else {
+		p.RoutingEligible = !websitePolicy && p.Healthy
+		if websitePolicy {
+			p.WebsiteState = "PENDING"
+			p.WebsiteReason = "awaiting scheduled website verification"
+			p.websiteSuccessCycles = 0
+			p.websiteFailureCycles = 0
+			p.websiteRecoveryPending = false
+		}
 	}
 	p.mu.Unlock()
 	if enabled {
@@ -695,14 +733,16 @@ func (c *Controller) selectManual(id string, forDuration time.Duration) error {
 	if p == nil {
 		return errors.New("profile not found")
 	}
+	websiteAllowed := c.websiteAllowed(p)
 	p.mu.Lock()
-	healthy := p.Healthy && p.enabled
+	healthy := p.Healthy && p.enabled && websiteAllowed
 	p.mu.Unlock()
 	if !healthy {
 		return errors.New("profile is not healthy")
 	}
 	c.mu.Lock()
 	c.manualUntil = time.Now().Add(forDuration)
+	c.manualProfile = p
 	c.active.Store(p)
 	c.lastSwitch = time.Now()
 	c.switches.Add(1)
@@ -710,9 +750,23 @@ func (c *Controller) selectManual(id string, forDuration time.Duration) error {
 	c.appendEvent(ControllerEvent{At: time.Now().UTC(), Kind: "manual_switch", Profile: p.ID, Message: "manual profile override"})
 	return nil
 }
+
+func (c *Controller) websiteAllowed(p *Profile) bool {
+	c.websiteMu.RLock()
+	enabled := websitePolicyApplies(c.websiteConfig)
+	c.websiteMu.RUnlock()
+	if !enabled {
+		return true
+	}
+	p.mu.Lock()
+	allowed := p.RoutingEligible
+	p.mu.Unlock()
+	return allowed
+}
 func (c *Controller) clearManual() {
 	c.mu.Lock()
 	c.manualUntil = time.Time{}
+	c.manualProfile = nil
 	c.lastSwitch = time.Time{}
 	c.mu.Unlock()
 	c.selectProfile()
@@ -770,6 +824,7 @@ func (c *Controller) replaceRuntimeConfig(id string, config []byte) error {
 	if p == nil {
 		return errors.New("profile not found")
 	}
+	websitePolicy := websitePolicyApplies(c.websiteConfigSnapshot())
 	p.mu.Lock()
 	p.config = append([]byte(nil), config...)
 	p.configRevision++
@@ -781,6 +836,19 @@ func (c *Controller) replaceRuntimeConfig(id string, config []byte) error {
 	p.Failures = 0
 	p.State = "CONNECTING"
 	p.LastError = "configuration replaced"
+	p.websiteSuccessCycles = 0
+	p.websiteFailureCycles = 0
+	p.websiteFailures = map[string]int{}
+	p.websiteSuccesses = map[string]int{}
+	if websitePolicy {
+		p.WebsiteState = "PENDING"
+		p.WebsiteReason = "configuration replaced; awaiting website verification"
+		p.RoutingEligible = false
+	} else {
+		p.WebsiteState = "DISABLED"
+		p.WebsiteReason = ""
+		p.RoutingEligible = false
+	}
 	restart := p.restartReq
 	p.mu.Unlock()
 	if wasActive {
@@ -795,9 +863,16 @@ func (c *Controller) replaceRuntimeConfig(id string, config []byte) error {
 }
 
 func (c *Controller) socksDial(ctx context.Context, p *Profile, address string) (net.Conn, error) {
+	if p == nil || !c.websiteAllowed(p) {
+		return nil, errors.New("profile blocked by website availability policy")
+	}
 	p.mu.Lock()
 	addr := p.socks
+	allowed := p.Healthy && p.enabled
 	p.mu.Unlock()
+	if !allowed {
+		return nil, errors.New("active VPN profile is unhealthy")
+	}
 	return c.socksDialAt(ctx, addr, address)
 }
 
@@ -1058,10 +1133,14 @@ func (c *Controller) dialProfile(ctx context.Context, p *Profile, address string
 	if p == nil {
 		return nil, errors.New("no healthy VPN profile")
 	}
+	websiteAllowed := c.websiteAllowed(p)
 	p.mu.Lock()
-	healthy := p.Healthy
+	healthy, enabled := p.Healthy, p.enabled
 	p.mu.Unlock()
-	if !healthy {
+	if !healthy || !enabled || !websiteAllowed {
+		if !websiteAllowed {
+			return nil, errors.New("profile blocked by website availability policy")
+		}
 		return nil, errors.New("active VPN profile is unhealthy")
 	}
 	return c.socksDial(ctx, p, address)
@@ -1443,6 +1522,7 @@ func (c *Controller) monitor(ctx context.Context) {
 }
 
 func (c *Controller) recordHealth(p *Profile, result healthResult) {
+	websitePolicy := websitePolicyApplies(c.websiteConfigSnapshot())
 	p.mu.Lock()
 	if result.Revision != p.configRevision {
 		p.mu.Unlock()
@@ -1495,6 +1575,13 @@ func (c *Controller) recordHealth(p *Profile, result healthResult) {
 			default:
 			}
 		}
+	}
+	if !websitePolicy {
+		p.RoutingEligible = true
+	} else if p.WebsiteState == "PASSED" {
+		p.RoutingEligible = true
+	} else if p.WebsiteState == "FAILED" || p.WebsiteState == "PENDING" || p.WebsiteState == "" {
+		p.RoutingEligible = false
 	}
 	sample := HealthSample{At: p.LastCheck.UTC(), Profile: p.ID, ConnectivityOK: result.TransportOK && result.Healthy, ServiceOK: result.ServiceOK, Reason: result.Reason}
 	p.mu.Unlock()
@@ -1633,25 +1720,34 @@ func (c *Controller) selectProfile() {
 		profiles[j].mu.Unlock()
 		return pi < pj
 	})
+	manualTarget := (*Profile)(nil)
 	if !c.manualUntil.IsZero() && time.Now().Before(c.manualUntil) {
-		manual := c.active.Load()
+		manual := c.manualProfile
 		if manual != nil {
+			websiteAllowed := c.websiteAllowed(manual)
 			manual.mu.Lock()
-			healthy := manual.Healthy && manual.enabled
+			healthy := manual.Healthy && manual.enabled && websiteAllowed
 			manual.mu.Unlock()
 			if healthy {
-				return
+				manualTarget = manual
 			}
 		}
+	} else if !c.manualUntil.IsZero() {
 		c.manualUntil = time.Time{}
+		c.manualProfile = nil
 	}
-	for _, p := range profiles {
-		p.mu.Lock()
-		healthy := p.Healthy && p.enabled
-		p.mu.Unlock()
-		if healthy {
-			candidate = p
-			break
+	if manualTarget != nil {
+		candidate = manualTarget
+	} else {
+		for _, p := range profiles {
+			websiteAllowed := c.websiteAllowed(p)
+			p.mu.Lock()
+			healthy := p.Healthy && p.enabled && websiteAllowed
+			p.mu.Unlock()
+			if healthy {
+				candidate = p
+				break
+			}
 		}
 	}
 	old := c.active.Load()
@@ -1659,6 +1755,7 @@ func (c *Controller) selectProfile() {
 		return
 	}
 	oldHealthy, oldReason := false, ""
+	oldWebsiteAllowed := old == nil || c.websiteAllowed(old)
 	// Returning to a higher-priority profile requires a stable recovery window,
 	// in addition to consecutive successful probes. Emergency failover is never delayed.
 	if old != nil && candidate != nil {
@@ -1669,23 +1766,26 @@ func (c *Controller) selectProfile() {
 		candidate.mu.Lock()
 		candidatePriority, recoveredAt := candidate.Priority, candidate.healthySince
 		candidate.mu.Unlock()
-		if oldHealthy && candidatePriority < oldPriority && !recoveredAt.IsZero() && time.Since(recoveredAt) < c.settings.Failover.RecoveryInterval {
+		if oldHealthy && oldWebsiteAllowed && candidatePriority < oldPriority && !recoveredAt.IsZero() && time.Since(recoveredAt) < c.settings.Failover.RecoveryInterval {
 			candidate = old
 		}
 	}
 	if candidate == old {
 		return
 	}
-	if !c.settings.Failover.Enabled && old != nil {
+	if !c.settings.Failover.Enabled && old != nil && oldWebsiteAllowed {
 		return
 	}
 	if old != nil {
 		old.mu.Lock()
 		oldHealthy = old.Healthy
 		oldReason = old.LastError
+		if !oldWebsiteAllowed && old.WebsiteReason != "" {
+			oldReason = "website policy: " + old.WebsiteReason
+		}
 		old.mu.Unlock()
 		// Never allow cooldown to postpone an emergency failover from an unhealthy active route.
-		if oldHealthy && candidate != nil && time.Since(c.lastSwitch) < c.settings.Failover.SwitchCooldown {
+		if oldHealthy && oldWebsiteAllowed && candidate != nil && time.Since(c.lastSwitch) < c.settings.Failover.SwitchCooldown {
 			return
 		}
 	}
@@ -1700,8 +1800,12 @@ func (c *Controller) selectProfile() {
 		to = candidate.Name
 	}
 	message := from + " → " + to
-	if old != nil && !oldHealthy && oldReason != "" {
-		message += "; confirmed connectivity failure: " + oldReason
+	if old != nil && (!oldHealthy || !oldWebsiteAllowed) && oldReason != "" {
+		cause := "confirmed connectivity failure"
+		if !oldWebsiteAllowed {
+			cause = "confirmed website policy failure"
+		}
+		message += "; " + cause + ": " + oldReason
 	}
 	if candidate == nil {
 		var states []string
@@ -1743,7 +1847,7 @@ func (c *Controller) snapshot() Snapshot {
 	profiles := make([]*Profile, 0, len(c.profilesSnapshot()))
 	for _, p := range c.profilesSnapshot() {
 		p.mu.Lock()
-		copy := &Profile{Name: p.Name, ID: p.ID, Priority: p.Priority, State: p.State, Healthy: p.Healthy, ServiceHealthy: p.ServiceHealthy, ConnectivityOK: p.ConnectivityOK, Availability24H: p.Availability24H, Availability7D: p.Availability7D, Service24H: p.Service24H, Service7D: p.Service7D, LastError: p.LastError, LastCheck: p.LastCheck, LastSuccess: p.LastSuccess, HealthLatencyMS: p.HealthLatencyMS, ExternalIP: p.ExternalIP, Failures: p.Failures, Successes: p.Successes, Restarts: p.Restarts}
+		copy := &Profile{Name: p.Name, ID: p.ID, Priority: p.Priority, State: p.State, Healthy: p.Healthy, ServiceHealthy: p.ServiceHealthy, ConnectivityOK: p.ConnectivityOK, WebsiteState: p.WebsiteState, WebsiteReason: p.WebsiteReason, RoutingEligible: p.RoutingEligible, WebsiteLastCheck: p.WebsiteLastCheck, Availability24H: p.Availability24H, Availability7D: p.Availability7D, Service24H: p.Service24H, Service7D: p.Service7D, LastError: p.LastError, LastCheck: p.LastCheck, LastSuccess: p.LastSuccess, HealthLatencyMS: p.HealthLatencyMS, ExternalIP: p.ExternalIP, Failures: p.Failures, Successes: p.Successes, Restarts: p.Restarts}
 		p.mu.Unlock()
 		profiles = append(profiles, copy)
 	}
@@ -1753,7 +1857,7 @@ func (c *Controller) snapshot() Snapshot {
 	c.mu.Lock()
 	manualUntil := c.manualUntil
 	c.mu.Unlock()
-	return Snapshot{Active: activeID, Profiles: profiles, Since: c.started, Switches: c.switches.Load(), LastSwitch: lastSwitch, ManualUntil: manualUntil, ActiveConnections: c.activeConnections.Load(), MinimumHealthyProfiles: c.settings.Health.MinimumHealthyProfiles, FailureDomainNote: "Multiple WARP profiles may share Cloudflare infrastructure and are not independent protection against provider-wide blocking.", Events: events}
+	return Snapshot{Active: activeID, Profiles: profiles, Since: c.started, Switches: c.switches.Load(), LastSwitch: lastSwitch, ManualUntil: manualUntil, ActiveConnections: c.activeConnections.Load(), MinimumHealthyProfiles: c.settings.Health.MinimumHealthyProfiles, FailureDomainNote: "Multiple WARP profiles may share Cloudflare infrastructure and are not independent protection against provider-wide blocking.", WebsiteMonitorEnabled: websitePolicyApplies(c.websiteConfigSnapshot()), Events: events}
 }
 func (c *Controller) proxyHandler() http.Handler {
 	if c.requests == nil {
@@ -1802,7 +1906,9 @@ func (c *Controller) proxyHandler() http.Handler {
 				c.debugNetworkTrace(trace.snapshot())
 			}
 			if e != nil {
-				if strings.Contains(e.Error(), "no healthy VPN") || strings.Contains(e.Error(), "profile is unhealthy") {
+				if strings.Contains(e.Error(), "website availability policy") {
+					http.Error(w, "active VPN profile is blocked by required website availability policy", http.StatusServiceUnavailable)
+				} else if strings.Contains(e.Error(), "no healthy VPN") || strings.Contains(e.Error(), "profile is unhealthy") {
 					http.Error(w, "no healthy VPN profile", http.StatusServiceUnavailable)
 				} else {
 					http.Error(w, "VPN transport failed at "+proxyFailureStage(e)+": "+classifyHealthError(e), http.StatusBadGateway)
@@ -1837,10 +1943,15 @@ func (c *Controller) proxyHandler() http.Handler {
 			http.Error(w, "no healthy VPN profile", http.StatusServiceUnavailable)
 			return
 		}
+		websiteAllowed := c.websiteAllowed(p)
 		p.mu.Lock()
-		healthy, tr := p.Healthy, p.transport
+		healthy, enabled, tr := p.Healthy, p.enabled, p.transport
 		p.mu.Unlock()
-		if !healthy || tr == nil {
+		if !healthy || !enabled || !websiteAllowed || tr == nil {
+			if !websiteAllowed {
+				http.Error(w, "active VPN profile is blocked by required website availability policy", http.StatusServiceUnavailable)
+				return
+			}
 			http.Error(w, "active VPN profile is unhealthy", http.StatusServiceUnavailable)
 			return
 		}
@@ -2025,6 +2136,21 @@ func main() {
 		adminAddr = "0.0.0.0:8080"
 	}
 	admin := &webServer{controller: c, dataDir: dataDir, sessions: map[string]webSession{}}
+	c.onWebsiteState = func() {
+		if err := admin.persistWebsiteState(); err != nil {
+			slog.Error("website monitor state persistence failed", "error", err)
+		}
+	}
+	if err := c.loadWebsiteMonitor(dataDir); err != nil {
+		slog.Error("website monitor settings", "error", err)
+		c.websiteMu.Lock()
+		c.websiteConfig = defaultWebsiteMonitorConfig()
+		c.websiteDataDir = dataDir
+		c.websiteMu.Unlock()
+	}
+	if err := c.loadWebsiteHistory(); err != nil {
+		slog.Error("website monitor history", "error", err)
+	}
 	if events, err := loadStateEvents(dataDir); err != nil {
 		slog.Error("event history", "error", err)
 	} else {
@@ -2042,6 +2168,7 @@ func main() {
 		}
 	}
 	c.start(ctx)
+	c.startWebsiteMonitor(ctx)
 	proxySrv := &http.Server{Addr: fmt.Sprintf("0.0.0.0:%d", s.Proxy.HTTPPort), Handler: applicationHandler(c), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 1 << 20}
 	adminSrv := &http.Server{Addr: adminAddr, Handler: admin.handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	go func() {

@@ -50,6 +50,7 @@ type webServer struct {
 	configGen       configGeneratorSettings
 	configGenRun    sync.Mutex
 	configGenStarts []time.Time
+	websitePreviews map[string]pendingWebsitePreview
 }
 
 func randomToken(n int) (string, error) {
@@ -239,12 +240,22 @@ func (s *webServer) handler() http.Handler {
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 		_, _ = w.Write(b)
 	})
+	mux.HandleFunc("/website-monitor.js", func(w http.ResponseWriter, r *http.Request) {
+		b, e := webFiles.ReadFile("web/website-monitor.js")
+		if e != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		_, _ = w.Write(b)
+	})
 	mux.HandleFunc("/api/session", s.session)
 	mux.HandleFunc("/api/status", s.requireAuth(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.controller.snapshot()) }))
 	mux.HandleFunc("/api/events", s.requireAuth(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.controller.snapshot().Events) }))
 	mux.HandleFunc("/api/profiles", s.requireAuth(s.profiles))
 	mux.HandleFunc("/api/profiles/", s.requireAuth(s.profile))
 	mux.HandleFunc("/api/diagnostics/check", s.requireAuth(s.diagnosticCheck))
+	mux.HandleFunc("/api/website-monitor/", s.requireAuth(s.websiteMonitorAPI))
 	mux.HandleFunc("/api/diagnostics/debug", s.requireAuth(s.networkDebug))
 	mux.HandleFunc("/api/support-bundle", s.requireAuth(s.downloadSupportBundle))
 	mux.HandleFunc("/api/config-generator/settings", s.requireAuth(s.configGeneratorSettingsHandler))
@@ -506,6 +517,10 @@ func (s *webServer) upload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		_ = os.Remove(path)
 		http.Error(w, "profile was stored but could not be started", 503)
+		return
+	}
+	if err := s.qualifyAddedProfile(id); err != nil {
+		http.Error(w, "profile imported but website monitor check could not complete", 503)
 		return
 	}
 	if err = s.persistState(); err != nil {
@@ -924,6 +939,10 @@ type profilePublic struct {
 	Availability7D      float64   `json:"availability_7d"`
 	ServiceHealth24H    float64   `json:"service_health_24h"`
 	ServiceHealth7D     float64   `json:"service_health_7d"`
+	WebsiteHealth       string    `json:"website_health"`
+	WebsiteReason       string    `json:"website_reason,omitempty"`
+	RoutingEligible     bool      `json:"routing_eligible"`
+	WebsiteLastCheck    time.Time `json:"website_last_check,omitempty"`
 	LastError           string    `json:"last_error,omitempty"`
 	LastCheck           time.Time `json:"last_check,omitempty"`
 	LastSuccess         time.Time `json:"last_success,omitempty"`
@@ -940,7 +959,7 @@ type profilePublic struct {
 func profileView(p *Profile) profilePublic {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	v := profilePublic{Name: p.Name, ID: p.ID, Priority: p.Priority, State: p.State, Healthy: p.Healthy, ConnectivityHealthy: p.ConnectivityOK, ServiceHealthy: p.ServiceHealthy, Availability24H: p.Availability24H, Availability7D: p.Availability7D, ServiceHealth24H: p.Service24H, ServiceHealth7D: p.Service7D, LastError: p.LastError, LastCheck: p.LastCheck, LastSuccess: p.LastSuccess, LatencyMS: p.HealthLatencyMS, Restarts: p.Restarts, Source: "filesystem", ExternalIP: p.ExternalIP, Protocol: "WireGuard"}
+	v := profilePublic{Name: p.Name, ID: p.ID, Priority: p.Priority, State: p.State, Healthy: p.Healthy, ConnectivityHealthy: p.ConnectivityOK, ServiceHealthy: p.ServiceHealthy, Availability24H: p.Availability24H, Availability7D: p.Availability7D, ServiceHealth24H: p.Service24H, ServiceHealth7D: p.Service7D, WebsiteHealth: p.WebsiteState, WebsiteReason: p.WebsiteReason, RoutingEligible: p.RoutingEligible, WebsiteLastCheck: p.WebsiteLastCheck, LastError: p.LastError, LastCheck: p.LastCheck, LastSuccess: p.LastSuccess, LatencyMS: p.HealthLatencyMS, Restarts: p.Restarts, Source: "filesystem", ExternalIP: p.ExternalIP, Protocol: "WireGuard"}
 	if strings.Contains(p.path, "/data/profiles/") {
 		v.Source = "imported"
 	}

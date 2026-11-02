@@ -285,7 +285,7 @@ func TestProxyNeverFallsBackDirect(t *testing.T) {
 	settings := Settings{}
 	settings.Failover.CheckTimeout = 150 * time.Millisecond
 	c := &Controller{settings: settings}
-	p := &Profile{Name: "broken", State: "HEALTHY", Healthy: true, socks: "127.0.0.1:1"}
+	p := &Profile{Name: "broken", State: "HEALTHY", Healthy: true, enabled: true, socks: "127.0.0.1:1"}
 	p.transport = &http.Transport{DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 		return c.socksDial(ctx, p, address)
 	}}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -612,14 +613,16 @@ func (s *webServer) generateWarpProfilesHandler(w http.ResponseWriter, r *http.R
 	}
 
 	type itemResult struct {
-		Index         int            `json:"index"`
-		ProfileID     string         `json:"profile_id,omitempty"`
-		ProfileName   string         `json:"profile_name,omitempty"`
-		Saved         bool           `json:"saved"`
-		Enabled       bool           `json:"enabled"`
-		Verified      bool           `json:"verified"`
-		FailureReason string         `json:"failure_reason,omitempty"`
-		HTTPSProbe    map[string]any `json:"https_probe,omitempty"`
+		Index           int            `json:"index"`
+		ProfileID       string         `json:"profile_id,omitempty"`
+		ProfileName     string         `json:"profile_name,omitempty"`
+		Saved           bool           `json:"saved"`
+		Enabled         bool           `json:"enabled"`
+		Verified        bool           `json:"verified"`
+		FailureReason   string         `json:"failure_reason,omitempty"`
+		HTTPSProbe      map[string]any `json:"https_probe,omitempty"`
+		WebsiteHealth   string         `json:"website_health,omitempty"`
+		RoutingEligible bool           `json:"routing_eligible"`
 	}
 	results := make([]itemResult, 0, len(generation.Configs))
 	var eligible []string
@@ -671,6 +674,32 @@ func (s *webServer) generateWarpProfilesHandler(w http.ResponseWriter, r *http.R
 			profile.mu.Unlock()
 		}
 		results = append(results, item)
+	}
+	if websitePolicyApplies(s.controller.websiteConfigSnapshot()) {
+		for _, id := range eligible {
+			if err := s.qualifyAddedProfile(id); err != nil {
+				slog.Warn("generated profile website qualification incomplete", "profile", id)
+			}
+		}
+		for i := range results {
+			if results[i].ProfileID == "" {
+				continue
+			}
+			p := s.controller.findProfile(results[i].ProfileID)
+			if p == nil {
+				continue
+			}
+			p.mu.Lock()
+			results[i].WebsiteHealth = p.WebsiteState
+			results[i].RoutingEligible = p.RoutingEligible
+			p.mu.Unlock()
+			if !results[i].RoutingEligible {
+				results[i].Verified = false
+				if results[i].FailureReason == "" {
+					results[i].FailureReason = "mandatory website checks have not passed; profile is excluded from routing"
+				}
+			}
+		}
 	}
 	if err := s.persistState(); err != nil {
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"success": false, "message": "Generated configs were stored, but profile state could not be persisted."})

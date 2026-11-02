@@ -238,7 +238,7 @@ func testController(t *testing.T, socksAddr string) *Controller {
 	settings.Failover.FailureThreshold = 2
 	settings.Failover.RecoveryThreshold = 1
 	settings.Health.RequiredSuccesses = 1
-	p := &Profile{Name: "test", ID: "test", Priority: 0, State: "HEALTHY", Healthy: true, socks: socksAddr}
+	p := &Profile{Name: "test", ID: "test", Priority: 0, State: "HEALTHY", Healthy: true, enabled: true, socks: socksAddr}
 	c := &Controller{profiles: []*Profile{p}, settings: settings, started: time.Now(), requests: make(chan struct{}, 64)}
 	p.transport = &http.Transport{DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 		return c.socksDial(ctx, p, address)

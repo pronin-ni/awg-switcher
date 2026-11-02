@@ -82,6 +82,24 @@ try {
   if (!beforeRestart[0].includes('Приоритет 0') || !beforeRestart[1].includes('Приоритет 1')) {
     throw new Error(`unexpected priorities before restart: ${beforeRestart.join(' | ')}`);
   }
+  page.on('dialog', (dialog) => dialog.accept());
+  await page.locator('.rail nav a[href="#website-monitor"]').click();
+  await page.locator('#website-monitor').waitFor({ state: 'visible' });
+  await page.locator('[data-template="template-github"]').waitFor();
+  await page.locator('#wm-name').fill('Optional test target');
+  await page.locator('#wm-url').fill('https://example.com/health');
+  await page.locator('#wm-site-enabled').uncheck();
+  await page.locator('#wm-add-form button[type="submit"]').click();
+  await page.locator('.wm-site').waitFor();
+  await page.locator('#wm-enabled').check();
+  await page.locator('#wm-save').click();
+  await page.waitForFunction(async () => (await (await fetch('/api/website-monitor/settings')).json()).enabled === true);
+  await page.locator('#wm-mode').selectOption('daily');
+  await page.locator('#wm-daily-at').fill('09:00');
+  await page.locator('#wm-timezone').fill('Europe/Moscow');
+  await page.locator('#wm-paused').check();
+  await page.locator('#wm-save').click();
+  await page.waitForFunction(async () => { const s=await (await fetch('/api/website-monitor/settings')).json(); return s.schedule.mode==='daily'&&s.schedule.timezone==='Europe/Moscow'&&s.schedule.paused===true });
   await page.locator('#logout').click();
   docker('restart', name);
   for (let attempt = 0; attempt < 40; attempt++) {
@@ -105,6 +123,8 @@ try {
   if (!afterRestart[0].includes('Приоритет 0') || !afterRestart[1].includes('Приоритет 1')) {
     throw new Error(`priorities changed after restart: ${afterRestart.join(' | ')}`);
   }
+  await page.locator('.rail nav a[href="#website-monitor"]').click();
+  await page.waitForFunction(async () => { const s=await (await fetch('/api/website-monitor/settings')).json(); return s.enabled===true&&s.schedule.mode==='daily'&&s.schedule.timezone==='Europe/Moscow'&&s.schedule.paused===true&&s.websites.some(w=>w.name==='Optional test target') });
   await page.locator('a[href="#diagnostics"]').click();
   await page.locator('#network-debug').check();
   await page.locator('#debug-state').getByText('активна').waitFor();
@@ -114,7 +134,7 @@ try {
   await page.locator('#download-support').click();
   const report = await downloadPromise;
   if (report.suggestedFilename() !== 'awg-switcher-support.json') throw new Error('unexpected support report filename');
-  console.log('PASS: first-run setup, login, visible WARP generator action and modal, awgconfig.com default, profile upload/order persistence, Network Debug toggle and support report download');
+  console.log('PASS: first-run setup, login, WARP generator, profiles/restart persistence, website-monitor selection/schedule/restart persistence, Network Debug and support report');
 } finally {
   await browser?.close();
   try { docker('rm', '-f', name); } catch {}
