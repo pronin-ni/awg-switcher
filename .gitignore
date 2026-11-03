@@ -20,4 +20,6 @@ runtime/
 /awg-switcher
 /dist/
 /artifacts/automation-redesign/*.png
+/UI_AUDIT.md
+/artifacts/
 .DS_Store
