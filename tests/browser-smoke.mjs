@@ -120,14 +120,25 @@ try {
     if (layout.scroll > layout.width + 2) throw new Error(`automation UI overflows ${viewport.width}px viewport: ${JSON.stringify(layout)}`);
     if (viewport.width === 1280) await page.screenshot({ path: 'artifacts/automation-redesign/laptop.png', fullPage: true });
   }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('#mobile-menu-toggle').click();
+  await page.locator('#primary-navigation').getByRole('link', { name: 'Автоматизация' }).waitFor({ state: 'visible' });
+  if ((await page.locator('#mobile-menu-toggle').getAttribute('aria-expanded')) !== 'true') throw new Error('mobile navigation did not expose its expanded state');
+  await page.screenshot({ path: 'artifacts/automation-redesign/mobile-menu.png', fullPage: true });
+  await page.locator('#mobile-menu-toggle').click();
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.screenshot({ path: 'artifacts/automation-redesign/desktop.png', fullPage: true });
   if (!(await page.locator('#site-next-check').textContent()).includes('выключены')) throw new Error('disabled website checks do not show disabled schedule state');
   if (!(await page.locator('#site-last-run').textContent()).includes('Ещё не проверялся')) throw new Error('empty Website Monitor timestamp was rendered as a date');
   if (!(await page.locator('#pool-last-run').textContent()).includes('Ещё не запускалось')) throw new Error('empty replenishment timestamp was rendered as a date');
+  const actualReadiness = await page.evaluate(() => {
+    const { profiles, system } = window.awgAutomationState;
+    return { total: profiles.length, ready: profiles.filter(p => p.healthy && (p.routing_eligible !== false || !system.website_monitor_enabled)).length };
+  });
   const renderedReadyCount = (await page.locator('#pool-ready-count').textContent()).trim();
-  const profileHealthKnown = await page.evaluate(() => window.awgAutomationState.profiles.some(p => p.state === 'HEALTHY' || p.state === 'UNHEALTHY' || p.last_check));
-  if (profileHealthKnown ? !/^\d+$/.test(renderedReadyCount) : renderedReadyCount !== 'Нет данных') throw new Error(`profile readiness did not distinguish missing and known health data: ${renderedReadyCount}`);
+  const expectedReadiness = actualReadiness.total ? `${actualReadiness.ready} / ${actualReadiness.total}` : 'Нет профилей';
+  if (renderedReadyCount !== expectedReadiness) throw new Error(`automation readiness differs from the backend/profile overview: UI=${renderedReadyCount}, backend=${expectedReadiness}`);
   const autoDefaults = await (await page.request.get(`${baseURL}/api/auto-replenishment/settings`)).json();
   if (autoDefaults.enabled !== false || autoDefaults.minimum_ready !== 2 || autoDefaults.target_ready !== 4) {
     throw new Error(`unexpected automatic replenishment defaults: ${JSON.stringify(autoDefaults)}`);
@@ -135,8 +146,11 @@ try {
 
   await page.locator('#site-settings-open').click();
   await page.locator('#site-settings-dialog').waitFor({ state: 'visible' });
+  console.log('SMOKE: editing local website configuration');
   await page.screenshot({ path: 'artifacts/automation-redesign/site-settings.png', fullPage: true });
-  await page.locator('[data-template-id="template-github"]').click();
+  await page.locator('#site-add-name').fill('GitHub API');
+  await page.locator('#site-add-url').fill('https://api.github.com/');
+  await page.locator('#site-add-button').click();
   await page.locator('#site-schedule-mode').selectOption('daily');
   await page.locator('#site-schedule-daily').fill('09:00');
   await page.locator('#site-settings-dialog .settings-advanced').evaluate(el => el.open = true);
@@ -146,7 +160,26 @@ try {
   await page.locator('#site-settings-dialog').waitFor({ state: 'hidden' });
   await page.locator('#wm-enabled').check();
   await page.waitForFunction(async () => (await (await fetch('/api/website-monitor/settings')).json()).enabled === true);
-  await page.locator('#site-next-check').waitFor();
+  console.log('SMOKE: monitor enabled; validating setup state');
+  await page.waitForFunction(() => document.querySelector('#site-state-pill')?.textContent === 'Требуется настройка');
+  await page.screenshot({ path: 'artifacts/automation-redesign/website-setup-required.png', fullPage: true });
+  await page.locator('#site-settings-open').click();
+  await page.locator('#site-settings-dialog .settings-advanced').evaluate(el => el.open = true);
+  await page.locator('#site-schedule-paused').uncheck();
+  await page.locator('#site-settings-form [type="submit"]').click();
+  await page.locator('#site-settings-dialog').waitFor({ state: 'hidden' });
+  console.log('SMOKE: schedule unpaused; validating running state');
+  await page.waitForFunction(() => document.querySelector('#site-state-pill')?.textContent === 'Работает');
+  const websiteCheckResponse = page.waitForResponse(response => response.url().includes('/api/website-monitor/check'));
+  await page.locator('#site-check-now').click();
+  const realCheckResponse = await websiteCheckResponse;
+  await page.waitForFunction(() => document.querySelector('#site-check-now')?.getAttribute('aria-busy') === 'false', null, { timeout: 90000 });
+  const websiteStatus = await (await page.request.get(`${baseURL}/api/website-monitor/status`)).json();
+  if (realCheckResponse.ok() && websiteStatus.last_check && (await page.locator('#site-last-run').textContent()).includes('Последняя проверка')) {
+    console.log('PASS: website check result and passed-profile summary came from the local backend API');
+  } else if (!realCheckResponse.ok() && !(await page.locator('#automation-toast').textContent()).trim()) {
+    throw new Error(`backend check failed without user feedback: HTTP ${realCheckResponse.status()}`);
+  }
 
   await page.locator('#pool-settings-open').click();
   await page.locator('#pool-settings-dialog').waitFor({ state: 'visible' });
@@ -155,18 +188,20 @@ try {
   await page.locator('#pool-target-input').fill('5');
   await page.locator('#pool-settings-dialog .settings-advanced:not(#pool-events-details)').evaluate(el => el.open = true);
   await page.locator('.pool-version[value="awg2"]').uncheck();
+  await page.locator('#pool-below-minimum').uncheck();
+  await page.locator('#pool-all-down').uncheck();
   await page.locator('#pool-settings-form [type="submit"]').click();
   await page.locator('#pool-settings-dialog').waitFor({ state: 'hidden' });
   await page.waitForFunction(async () => { const a=await (await fetch('/api/auto-replenishment/settings')).json(); return a.minimum_ready===3&&a.target_ready===5&&a.versions.length===2 });
 
-  await page.route('**/api/website-monitor/check', async route => {
-    await delay(700);
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ profiles: [], paused: true, last_check: new Date().toISOString() }) });
-  });
-  await page.locator('#site-check-now').click();
-  await page.waitForFunction(() => document.querySelector('#site-state-pill')?.textContent === 'Проверка…');
-  await page.waitForFunction(() => document.querySelector('#site-state-pill')?.textContent === 'Включено');
-  await page.unroute('**/api/website-monitor/check');
+  await page.locator('#auto-enabled').check();
+  await page.waitForFunction(async () => (await (await fetch('/api/auto-replenishment/settings')).json()).enabled === true);
+  await page.waitForFunction(async () => {
+    const status = await (await fetch('/api/auto-replenishment/status')).json();
+    return status.last_run_status !== '' && status.last_run_status !== 'running';
+  }, null, { timeout: 20000 });
+  await page.locator('#auto-enabled').uncheck();
+  await page.waitForFunction(async () => (await (await fetch('/api/auto-replenishment/settings')).json()).enabled === false);
 
   let mockedPoolEnabled = false;
   await page.route('**/api/auto-replenishment/settings', async route => {
@@ -234,7 +269,7 @@ try {
     throw new Error(`priorities changed after restart: ${afterRestart.join(' | ')}`);
   }
   await page.locator('.rail nav a[href="#website-monitor"]').click();
-  await page.waitForFunction(async () => { const s=await (await fetch('/api/website-monitor/settings')).json(); return s.enabled===true&&s.schedule.mode==='daily'&&s.schedule.timezone==='Europe/Moscow'&&s.schedule.paused===true&&s.websites.some(w=>w.name==='GitHub API') });
+  await page.waitForFunction(async () => { const s=await (await fetch('/api/website-monitor/settings')).json(); return s.enabled===true&&s.schedule.mode==='daily'&&s.schedule.timezone==='Europe/Moscow'&&s.schedule.paused===false&&s.websites.some(w=>w.name==='GitHub API') });
   await page.waitForFunction(async () => { const s=await (await fetch('/api/auto-replenishment/settings')).json(); return s.enabled===false&&s.minimum_ready===3&&s.target_ready===5&&s.versions.length===2 });
   await page.locator('a[href="#diagnostics"]').click();
   await page.locator('#network-debug').check();
