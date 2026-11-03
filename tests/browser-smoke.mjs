@@ -92,7 +92,7 @@ try {
   const automationLoadGate = new Promise(resolve => { releaseAutomationLoad = resolve; });
   const automationStatusRequested = new Promise(resolve => { signalAutomationLoad = resolve; });
   let holdAutomationStatus = true;
-  await page.route('**/api/status', async route => {
+  await page.route('**/api/website-monitor/settings', async route => {
     if (holdAutomationStatus) {
       holdAutomationStatus = false;
       signalAutomationLoad();
@@ -108,7 +108,7 @@ try {
   }
   releaseAutomationLoad();
   await page.waitForFunction(() => document.querySelector('#pool-ready-count')?.textContent !== '—');
-  await page.unroute('**/api/status');
+  await page.unroute('**/api/website-monitor/settings');
   if (!(await page.locator('#pool-ready-count').textContent()).includes('Нет профилей')) throw new Error('an empty profile list must be distinct from zero working profiles');
   await page.locator('.rail nav a[href="#dashboard"]').click();
   await page.locator('#dashboard').waitFor({ state: 'visible' });
