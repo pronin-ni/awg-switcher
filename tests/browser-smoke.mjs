@@ -7,6 +7,7 @@ import { mkdir } from 'node:fs/promises';
 const name = `awg-browser-${process.pid}`;
 const volume = `${name}-data`;
 const password = 'Browser-smoke-test-password-42';
+const image = process.env.AWG_TEST_IMAGE || 'awg-switcher:ci';
 const config = `[Interface]\nPrivateKey = <SYNTHETIC-TEST-NOT-SECRET>\nAddress = 172.16.0.2/32\n[Peer]\nPublicKey = synthetic-peer-key\nEndpoint = vpn.example.test:51820\nAllowedIPs = 0.0.0.0/0\n`;
 let browser;
 
@@ -14,8 +15,16 @@ function docker(...args) {
   return execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
+async function clickProfileMenuAction(row, action) {
+  await row.evaluate((el, key) => {
+    el.querySelector('.profile-menu').open = true;
+    el.querySelector(`[data-action="${key}"]`).click();
+  }, action);
+}
+
 try {
   await mkdir('artifacts/automation-redesign', { recursive: true });
+  await mkdir('artifacts/ui-polish', { recursive: true });
   docker('volume', 'create', volume);
   const portServer = createServer();
   await new Promise((resolve) => portServer.listen(0, '127.0.0.1', resolve));
@@ -24,7 +33,7 @@ try {
   docker('run', '-d', '--name', name, '--platform', 'linux/amd64', '--read-only',
     '--cap-drop=ALL', '--cap-add=CHOWN', '--cap-add=FOWNER', '--cap-add=SETGID', '--cap-add=SETUID',
     '--security-opt', 'no-new-privileges:true', '--tmpfs', '/run/awg-switcher:rw,noexec,nosuid,size=16m,uid=10001,gid=10001',
-    '-p', `127.0.0.1:${hostPort}:8080`, '-v', `${volume}:/app/data`, 'awg-switcher:ci');
+    '-p', `127.0.0.1:${hostPort}:8080`, '-v', `${volume}:/app/data`, image);
   const baseURL = `http://127.0.0.1:${hostPort}`;
   for (let attempt = 0; attempt < 40; attempt++) {
     try {
@@ -51,6 +60,23 @@ try {
   await page.locator('#password').fill(password);
   await page.locator('#login-form button').click();
   await page.locator('#dashboard').waitFor({ state: 'visible' });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => { window.scrollTo(0, 0); document.documentElement.dataset.theme = 'light'; });
+  await page.screenshot({ path: 'artifacts/ui-polish/overview-desktop-light.png', fullPage: true });
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+  await page.screenshot({ path: 'artifacts/ui-polish/overview-desktop-dark.png', fullPage: true });
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: 'artifacts/ui-polish/overview-laptop.png', fullPage: true });
+  for (const viewport of [{ width: 390, height: 844 }, { width: 360, height: 800 }]) {
+    await page.setViewportSize(viewport);
+    const layout = await page.locator('#dashboard').evaluate(el => ({ width: el.clientWidth, scroll: el.scrollWidth }));
+    if (layout.scroll > layout.width + 2) throw new Error(`overview overflow at ${viewport.width}px: ${JSON.stringify(layout)}`);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({ path: `artifacts/ui-polish/overview-mobile-${viewport.width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.locator('#theme').click();
   if (!['dark', 'light'].includes(await page.locator('html').getAttribute('data-theme'))) throw new Error('theme toggle did not apply a light/dark theme');
   await page.locator('#language').click();
@@ -79,6 +105,17 @@ try {
   }
   await page.locator('#generator-mode').selectOption('awg31');
   await page.locator('#generator-count').selectOption('3');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: 'artifacts/ui-polish/generator-form.png', fullPage: true });
+  await page.route('**/api/config-generator/generate', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ profiles: [
+    { index: 1, profile_name: 'WARP sample verified', saved: true, verified: true, enabled: true, routing_eligible: true },
+    { index: 2, profile_name: 'WARP sample blocked', saved: true, verified: false, enabled: false, routing_eligible: false, failure_reason: 'synthetic test: HTTPS timeout' },
+  ] }) }));
+  await page.locator('#generate-warp').click();
+  await page.locator('#generator-result .generator-counts').waitFor();
+  if (!(await page.locator('#generator-result .generator-counts').textContent()).includes('Создано конфигов: 2')) throw new Error('generation outcome counts are missing');
+  await page.screenshot({ path: 'artifacts/ui-polish/generator-result-synthetic.png', fullPage: true });
+  await page.unroute('**/api/config-generator/generate');
   await page.locator('#generator-close').click();
   const input = page.locator('#modal-files');
   await input.setInputFiles([
@@ -86,18 +123,29 @@ try {
     { name: 'backup.conf', mimeType: 'text/plain', buffer: Buffer.from(config.replace('172.16.0.2', '172.16.0.3')) },
   ]);
   await page.locator('#profile-list .profile-row').nth(1).waitFor();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: 'artifacts/ui-polish/profiles-desktop.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: 'artifacts/ui-polish/profiles-mobile-390.png', fullPage: true });
+  await page.setViewportSize({ width: 360, height: 800 });
+  const mobileProfileLayout = await page.locator('#profile-list').evaluate(el => ({ width: el.clientWidth, scroll: el.scrollWidth }));
+  if (mobileProfileLayout.scroll > mobileProfileLayout.width + 2) throw new Error(`profile list overflows at 360px: ${JSON.stringify(mobileProfileLayout)}`);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: 'artifacts/ui-polish/profiles-mobile-360.png', fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
   const initialNames = await page.locator('#profile-list .profile-row .profile-name').allTextContents();
   if (initialNames[0] !== 'primary' || initialNames[1] !== 'backup') {
     throw new Error(`first profile was not primary: ${initialNames.join(' | ')}`);
   }
   const secondRow = page.locator('#profile-list .profile-row').nth(1);
-  await secondRow.getByRole('button', { name: '↑' }).click();
+  await secondRow.getByRole('button', { name: 'Повысить приоритет' }).click();
   await page.waitForFunction(() => {
     const rows = [...document.querySelectorAll('#profile-list .profile-row')];
     return rows.length === 2 && rows[0].querySelector('.profile-name')?.textContent === 'backup';
   });
-  const beforeRestart = await page.locator('#profile-list .profile-row').evaluateAll((rows) => rows.map((row) => row.querySelector('.profile-sub').textContent));
-  if (!beforeRestart[0].includes('Приоритет 0') || !beforeRestart[1].includes('Приоритет 1')) {
+  const beforeRestart = await page.locator('#profile-list .profile-row').evaluateAll((rows) => rows.map((row) => row.querySelector('.profile-priority-label').textContent));
+  if (!beforeRestart[0].includes('0') || !beforeRestart[1].includes('1')) {
     throw new Error(`unexpected priorities before restart: ${beforeRestart.join(' | ')}`);
   }
   page.on('dialog', (dialog) => dialog.type() === 'prompt' ? dialog.accept('backup-renamed') : dialog.accept());
@@ -106,18 +154,28 @@ try {
   if (await unavailablePrimary.count() && !(await unavailablePrimary.isDisabled())) {
     throw new Error('unhealthy imported profile remained selectable as primary');
   }
-  await page.locator('#profile-list .profile-row').first().getByRole('button', { name: 'Переименовать' }).click();
+  await clickProfileMenuAction(page.locator('#profile-list .profile-row').first(), 'rename');
+  await page.waitForFunction(() => document.querySelector('#profile-list .profile-row .profile-name')?.textContent === 'backup-renamed');
+  page.removeAllListeners('dialog');
+  let promptValue = 'backup-renamed-with-a-deliberately-long-profile-name-to-check-layout-wrapping';
+  page.on('dialog', dialog => dialog.type() === 'prompt' ? dialog.accept(promptValue) : dialog.accept());
+  await clickProfileMenuAction(page.locator('#profile-list .profile-row').first(), 'rename');
+  await page.waitForFunction(() => document.querySelector('#profile-list .profile-row .profile-name')?.textContent.startsWith('backup-renamed-with-a-deliberately'));
+  const longNameLayout = await page.locator('#profile-list .profile-row').first().evaluate(el => ({ width: el.clientWidth, scroll: el.scrollWidth }));
+  if (longNameLayout.scroll > longNameLayout.width + 2) throw new Error(`long profile name broke row layout: ${JSON.stringify(longNameLayout)}`);
+  await page.screenshot({ path: 'artifacts/ui-polish/profile-long-name.png', fullPage: true });
+  promptValue = 'backup-renamed';
+  await clickProfileMenuAction(page.locator('#profile-list .profile-row').first(), 'rename');
   await page.waitForFunction(() => document.querySelector('#profile-list .profile-row .profile-name')?.textContent === 'backup-renamed');
   // Restore the original display name with an explicit prompt response.
   page.removeAllListeners('dialog');
   page.on('dialog', dialog => dialog.type() === 'prompt' ? dialog.accept('backup') : dialog.accept());
-  await page.locator('#profile-list .profile-row').first().getByRole('button', { name: 'Переименовать' }).click();
+  await clickProfileMenuAction(page.locator('#profile-list .profile-row').first(), 'rename');
   await page.waitForFunction(() => document.querySelector('#profile-list .profile-row .profile-name')?.textContent === 'backup');
-  await page.locator('#profile-list .profile-row').first().getByRole('button', { name: 'Отключить' }).click();
+  await clickProfileMenuAction(page.locator('#profile-list .profile-row').first(), 'toggle');
   console.log('SMOKE: profile disable/enable');
-  await page.locator('#profile-list .profile-row').first().getByRole('button', { name: 'Включить' }).waitFor();
-  await page.locator('#profile-list .profile-row').first().getByRole('button', { name: 'Включить' }).click();
-  await page.locator('#profile-list .profile-row').first().getByRole('button', { name: 'Отключить' }).waitFor();
+  await clickProfileMenuAction(page.locator('#profile-list .profile-row').first(), 'toggle');
+  await page.locator('#profile-list .profile-row').first().locator('[data-action="toggle"]').waitFor();
 
   console.log('SMOKE: duplicate/malformed profile protection and deletion');
   await page.locator('#modal-files').setInputFiles({ name: 'duplicate-primary.conf', mimeType: 'text/plain', buffer: Buffer.from(config) });
@@ -129,7 +187,7 @@ try {
   const disposableConfig = config.replace('172.16.0.2', '172.16.0.4');
   await page.locator('#modal-files').setInputFiles({ name: 'temporary.conf', mimeType: 'text/plain', buffer: Buffer.from(disposableConfig) });
   await page.locator('#profile-list .profile-row').nth(2).waitFor();
-  await page.locator('#profile-list .profile-row').last().getByRole('button', { name: 'Удалить' }).click();
+  await clickProfileMenuAction(page.locator('#profile-list .profile-row').last(), 'delete');
   await page.waitForFunction(() => document.querySelectorAll('#profile-list .profile-row').length === 2);
 
   await page.locator('.rail nav a[href="#website-monitor"]').click();
@@ -145,11 +203,12 @@ try {
   const automationHeading = await page.locator('#website-monitor h1').textContent();
   if (automationHeading !== 'Автоматизация') throw new Error(`unexpected automation heading: ${automationHeading}`);
   if (await page.locator('#website-monitor .automation-card').count() !== 2) throw new Error('automation overview must have exactly two compact cards');
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 390, height: 844 }, { width: 360, height: 800 }]) {
     await page.setViewportSize(viewport);
     const layout = await page.locator('#website-monitor').evaluate(el => ({ width: el.clientWidth, scroll: el.scrollWidth }));
     if (layout.scroll > layout.width + 2) throw new Error(`automation UI overflows ${viewport.width}px viewport: ${JSON.stringify(layout)}`);
     if (viewport.width === 1280) await page.screenshot({ path: 'artifacts/automation-redesign/laptop.png', fullPage: true });
+    if (viewport.width === 360) await page.screenshot({ path: 'artifacts/ui-polish/automation-mobile-360.png', fullPage: true });
   }
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('#mobile-menu-toggle').click();
@@ -202,6 +261,7 @@ try {
 
   await page.locator('#site-settings-open').click();
   await page.locator('#site-settings-dialog').waitFor({ state: 'visible' });
+  await page.screenshot({ path: 'artifacts/ui-polish/site-settings.png', fullPage: true });
   console.log('SMOKE: editing local website configuration');
   await page.screenshot({ path: 'artifacts/automation-redesign/site-settings.png', fullPage: true });
   await page.locator('#site-add-button').click();
@@ -209,6 +269,9 @@ try {
   await page.locator('[data-template-id="template-github"]').click();
   await page.locator('#site-editor-list .site-editor-row').waitFor();
   if ((await page.locator('#site-count-label').textContent()) !== '1/20') throw new Error('selecting a template did not add it to the selected-site list');
+  await page.locator('#site-editor-list .site-editor-row').first().locator('.site-editor-summary').click();
+  await page.screenshot({ path: 'artifacts/ui-polish/site-settings-selected.png', fullPage: true });
+  await page.locator('#site-editor-list .site-editor-row').first().locator('.site-editor-summary').click();
   await page.locator('#site-schedule-mode').selectOption('daily');
   await page.locator('#site-schedule-daily').fill('09:00');
   await page.locator('#site-settings-dialog .settings-advanced').evaluate(el => el.open = true);
@@ -222,6 +285,7 @@ try {
   await page.waitForFunction(() => document.querySelector('#site-state-pill')?.textContent === 'Требуется настройка');
   await page.screenshot({ path: 'artifacts/automation-redesign/website-setup-required.png', fullPage: true });
   await page.locator('#site-settings-open').click();
+  await page.locator('#site-editor-list .site-editor-row').first().locator('.site-editor-summary').click();
   await page.locator('#site-editor-list [data-remove-site]').click();
   await page.locator('#site-settings-dialog .settings-advanced').evaluate(el => el.open = true);
   await page.locator('#site-schedule-paused').uncheck();
@@ -310,7 +374,7 @@ try {
   await page.locator('.rail nav a[href="#website-monitor"]').click();
   await page.locator('#automation-error').waitFor({ state: 'visible' });
   await page.unroute('**/api/profiles');
-  await page.locator('#automation-retry').click();
+  await page.locator('#automation-retry').evaluate(el => el.click());
   await page.locator('#automation-error').waitFor({ state: 'hidden' });
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -337,14 +401,34 @@ try {
   if (restoredNames[0] !== 'backup' || restoredNames[1] !== 'primary') {
     throw new Error(`profile order changed on restart: ${restoredNames.join(' | ')}`);
   }
-  const afterRestart = await page.locator('#profile-list .profile-row').evaluateAll((rows) => rows.map((row) => row.querySelector('.profile-sub').textContent));
-  if (!afterRestart[0].includes('Приоритет 0') || !afterRestart[1].includes('Приоритет 1')) {
+  const afterRestart = await page.locator('#profile-list .profile-row').evaluateAll((rows) => rows.map((row) => row.querySelector('.profile-priority-label').textContent));
+  if (!afterRestart[0].includes('0') || !afterRestart[1].includes('1')) {
     throw new Error(`priorities changed after restart: ${afterRestart.join(' | ')}`);
   }
   await page.locator('.rail nav a[href="#website-monitor"]').click();
   await page.waitForFunction(async () => { const s=await (await fetch('/api/website-monitor/settings')).json(); return s.enabled===true&&s.schedule.mode==='daily'&&s.schedule.timezone==='Europe/Moscow'&&s.schedule.paused===false&&s.websites.some(w=>w.name==='GitHub API') });
   await page.waitForFunction(async () => { const s=await (await fetch('/api/auto-replenishment/settings')).json(); return s.enabled===false&&s.minimum_ready===3&&s.target_ready===5&&s.versions.length===2 });
   await page.locator('a[href="#diagnostics"]').click();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.route('**/api/diagnostics/check', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+    profile_name: 'Synthetic backup (test only)', hostname: 'example.test', duration_ms: 184, http_status: 204,
+    stages: { socks_handshake: { status: 'success', duration_ms: 2 }, tls_handshake: { status: 'success', duration_ms: 130 } },
+  }) }));
+  await page.locator('#run-check').click();
+  await page.locator('#diag-result .diagnostic-summary.is-ok').waitFor();
+  await page.locator('#diag-result details').locator('summary').click();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: 'artifacts/ui-polish/diagnostics-desktop.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: 'artifacts/ui-polish/diagnostics-mobile-390.png', fullPage: true });
+  await page.setViewportSize({ width: 360, height: 800 });
+  const narrowDiag = await page.locator('#diagnostics').evaluate(el => ({width:el.clientWidth,scroll:el.scrollWidth}));
+  if(narrowDiag.scroll>narrowDiag.width+2) throw new Error(`diagnostics overflow at 360px: ${JSON.stringify(narrowDiag)}`);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: 'artifacts/ui-polish/diagnostics-mobile-360.png', fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.unroute('**/api/diagnostics/check');
   await page.locator('#network-debug').check();
   await page.locator('#debug-state').getByText('активна').waitFor();
   await page.locator('#network-debug').uncheck();

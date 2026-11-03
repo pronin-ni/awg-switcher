@@ -29,22 +29,35 @@
   function showOutcome(result) {
     const root = $('#generator-result');
     root.replaceChildren();
+    const lang = localStorage.getItem('awg-lang') || 'ru';
+    const t = (ru, en) => lang === 'ru' ? ru : en;
+    const profiles = result.profiles || [];
+    const created = Number.isFinite(Number(result.generated)) ? Number(result.generated) : profiles.length;
+    const verified = profiles.filter((profile) => profile.verified).length;
+    const reserve = profiles.filter((profile) => profile.enabled && profile.routing_eligible !== false).length;
+    const failed = profiles.length - verified;
     const summary = document.createElement('p');
-    summary.className = 'muted';
-    summary.textContent = result.message || 'Проверка завершена.';
+    summary.className = 'generator-counts';
+    summary.textContent = `${t('Создано конфигов','Configs created')}: ${created} · ${t('Проверено успешно','Verified')}: ${verified} · ${t('Добавлено в резерв','Added as backup')}: ${reserve} · ${t('Не прошло проверку','Failed')}: ${failed}`;
     root.append(summary);
-    for (const profile of result.profiles || []) {
+    const nextStep = document.createElement('p');
+    nextStep.className = 'small muted';
+    nextStep.textContent = failed
+      ? t('Профили с ошибкой сохранены выключенными. Откройте профиль и проверьте причину; VPN-маршрут не изменён.','Failed profiles remain disabled. Review their reason; the active VPN route was not changed.')
+      : t('Дополнительные действия не требуются. Новые профили добавлены в резерв; текущий маршрут не изменён.','No further action is needed. New profiles were added as backups; the active route was not changed.');
+    root.append(nextStep);
+    for (const profile of profiles) {
       const row = document.createElement('div');
       row.className = `generator-outcome ${profile.verified ? 'is-ok' : 'is-error'}`;
       const title = document.createElement('strong');
       title.textContent = profile.profile_name || `Профиль ${profile.index}`;
       const detail = document.createElement('span');
       if (profile.verified) {
-        detail.textContent = 'HTTPS-проверка пройдена · добавлен резервным профилем';
+        detail.textContent = t('HTTPS-проверка пройдена · добавлен в резерв','HTTPS check passed · added as backup');
       } else if (profile.saved) {
-        detail.textContent = `Сохранён, но оставлен выключенным: ${profile.failure_reason || 'проверка не пройдена'}`;
+        detail.textContent = `${t('Сохранён, но оставлен выключенным','Saved but left disabled')}: ${profile.failure_reason || t('проверка не пройдена','verification failed')}`;
       } else {
-        detail.textContent = `Не импортирован: ${profile.failure_reason || 'неизвестная ошибка'}`;
+        detail.textContent = `${t('Не импортирован','Not imported')}: ${profile.failure_reason || t('неизвестная ошибка','unknown error')}`;
       }
       row.append(title, detail);
       root.append(row);
@@ -52,7 +65,7 @@
     if (result.generator_warning) {
       const warning = document.createElement('p');
       warning.className = 'small muted';
-      warning.textContent = `Предупреждение генератора: ${result.generator_warning}`;
+      warning.textContent = `${t('Предупреждение генератора','Generator warning')}: ${result.generator_warning}`;
       root.append(warning);
     }
   }
