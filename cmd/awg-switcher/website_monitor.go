@@ -103,7 +103,7 @@ func statusRange(from, to int) []int {
 }
 
 func defaultWebsiteMonitorConfig() WebsiteMonitorConfig {
-	return WebsiteMonitorConfig{Websites: []Website{}, TimeoutSeconds: 10, FailureThreshold: 2, RecoveryThreshold: 3, Policy: "all_required", Schedule: WebsiteSchedule{Mode: "every", Minutes: 30, Timezone: "UTC"}}
+	return WebsiteMonitorConfig{Websites: []Website{}, TimeoutSeconds: 15, FailureThreshold: 2, RecoveryThreshold: 2, Policy: "all_required", Schedule: WebsiteSchedule{Mode: "every", Minutes: 30, Timezone: "UTC"}}
 }
 
 func validateWebsiteConfig(c WebsiteMonitorConfig) error {

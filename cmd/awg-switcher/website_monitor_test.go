@@ -22,6 +22,9 @@ import (
 
 func TestWebsiteScheduleAndPublicURLValidation(t *testing.T) {
 	cfg := defaultWebsiteMonitorConfig()
+	if cfg.TimeoutSeconds != 15 || cfg.FailureThreshold != 2 || cfg.RecoveryThreshold != 2 || cfg.Policy != "all_required" {
+		t.Fatalf("unexpected simple Website Monitor defaults: timeout=%d fail=%d recover=%d policy=%s", cfg.TimeoutSeconds, cfg.FailureThreshold, cfg.RecoveryThreshold, cfg.Policy)
+	}
 	cfg.Schedule = WebsiteSchedule{Mode: "every", Minutes: 5, Timezone: "UTC"}
 	now := time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)
 	if got := nextWebsiteTime(now, cfg.Schedule); !got.Equal(now.Add(5 * time.Minute)) {

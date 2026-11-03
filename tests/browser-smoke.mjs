@@ -50,9 +50,9 @@ try {
   await page.locator('#theme').click();
   if (!['dark', 'light'].includes(await page.locator('html').getAttribute('data-theme'))) throw new Error('theme toggle did not apply a light/dark theme');
   await page.locator('#language').click();
-  if (!(await page.locator('.rail nav a[href="#website-monitor"]').textContent()).toLowerCase().includes('website')) throw new Error('English navigation translation did not apply');
+  if (!(await page.locator('.rail nav a[href="#website-monitor"]').textContent()).toLowerCase().includes('automation')) throw new Error('English navigation translation did not apply');
   await page.locator('#language').click();
-  if (!(await page.locator('.rail nav a[href="#website-monitor"]').textContent()).includes('Проверки сайтов')) throw new Error('Russian navigation translation did not restore');
+  if (!(await page.locator('.rail nav a[href="#website-monitor"]').textContent()).includes('Автоматизация')) throw new Error('Russian navigation translation did not restore');
   await page.locator('#theme').click();
   await page.locator('.rail nav a[href="#dashboard"]').click();
   await page.locator('#dashboard').waitFor({ state: 'visible' });
@@ -92,7 +92,14 @@ try {
   page.on('dialog', (dialog) => dialog.accept());
   await page.locator('.rail nav a[href="#website-monitor"]').click();
   await page.locator('#website-monitor').waitFor({ state: 'visible' });
+  await page.setViewportSize({width:390,height:844});
+  const mobileLayout=await page.locator('#website-monitor').evaluate(el=>({width:el.clientWidth,scroll:el.scrollWidth}));if(mobileLayout.scroll>mobileLayout.width+2)throw new Error(`automation UI overflows mobile viewport: ${JSON.stringify(mobileLayout)}`);
+  await page.setViewportSize({width:1280,height:900});
   await page.locator('#auto-enabled').waitFor();
+  await page.waitForFunction(() => document.querySelector('#wm-next-check')?.textContent.includes('выключены'));
+  if (!(await page.locator('#wm-last-check-summary').textContent()).includes('Ещё не проверялся')) throw new Error('empty Website Monitor timestamp was rendered as a date');
+  if (!(await page.locator('#auto-status').textContent()).includes('Ещё не запускалось')) throw new Error('empty replenishment timestamp was rendered as a date');
+  if ((await page.locator('#wm-results').innerText()).includes('01.01.1') || (await page.locator('#wm-results').innerText()).includes('0ms')) throw new Error('empty website results displayed an invalid date or latency');
   const autoDefaults = await (await page.request.get(`${baseURL}/api/auto-replenishment/settings`)).json();
   if (autoDefaults.enabled !== false || autoDefaults.minimum_ready !== 2 || autoDefaults.target_ready !== 4) {
     throw new Error(`unexpected automatic replenishment defaults: ${JSON.stringify(autoDefaults)}`);
@@ -101,9 +108,8 @@ try {
   await page.waitForTimeout(5500);
   if ((await page.locator('#auto-minimum').inputValue()) !== '3') throw new Error('automatic settings refresh overwrote an unsaved UI edit');
   await page.locator('#auto-target').fill('5');
+  await page.locator('#auto-replenishment > details').evaluate(el => el.open = true);
   await page.locator('.auto-version[value="awg2"]').uncheck();
-  await page.locator('#auto-save').click();
-  await page.waitForFunction(async () => { const s=await (await fetch('/api/auto-replenishment/settings')).json(); return s.enabled===false&&s.minimum_ready===3&&s.target_ready===5&&s.versions.length===2 });
   const disabledCheckStatus = await page.evaluate(async () => {
     const csrf = (await (await fetch('/api/session')).json()).csrf;
     return (await fetch('/api/auto-replenishment/check', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: '{}' })).status;
@@ -112,12 +118,10 @@ try {
   await page.locator('[data-template="template-github"]').waitFor();
   await page.locator('#wm-name').fill('Optional test target');
   await page.locator('#wm-url').fill('https://example.com/health');
-  await page.locator('#wm-site-enabled').uncheck();
   await page.locator('#wm-add-form button[type="submit"]').click();
   await page.locator('.wm-site').waitFor();
   await page.locator('#wm-enabled').check();
-  await page.locator('#wm-save').click();
-  await page.waitForFunction(async () => (await (await fetch('/api/website-monitor/settings')).json()).enabled === true);
+  await page.locator('#website-monitor > .automation-card details').first().evaluate(el => el.open = true);
   await page.locator('#wm-mode').selectOption('daily');
   await page.locator('#wm-daily-wrap').waitFor({ state: 'visible' });
   await page.locator('#wm-daily-at').fill('09:00');
@@ -130,7 +134,7 @@ try {
     throw new Error(`website-monitor refresh overwrote unsaved schedule edits: mode=${unsavedMode} paused=${unsavedPaused}`);
   }
   await page.locator('#wm-save').click();
-  await page.waitForFunction(async () => { const s=await (await fetch('/api/website-monitor/settings')).json(); return s.schedule.mode==='daily'&&s.schedule.timezone==='Europe/Moscow'&&s.schedule.paused===true });
+  await page.waitForFunction(async () => { const s=await (await fetch('/api/website-monitor/settings')).json(); const a=await (await fetch('/api/auto-replenishment/settings')).json(); return s.enabled===true&&s.schedule.mode==='daily'&&s.schedule.timezone==='Europe/Moscow'&&s.schedule.paused===true&&a.minimum_ready===3&&a.target_ready===5&&a.versions.length===2 });
   await page.locator('#logout').click();
   docker('restart', name);
   for (let attempt = 0; attempt < 40; attempt++) {
