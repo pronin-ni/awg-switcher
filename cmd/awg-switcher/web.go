@@ -575,6 +575,10 @@ func (s *webServer) upload(w http.ResponseWriter, r *http.Request) {
 	p, err := s.controller.addRuntimeProfile(id, name, normalized, path)
 	if err != nil {
 		_ = os.Remove(path)
+		if errors.Is(err, errProfileConfigDuplicate) {
+			http.Error(w, "an identical profile configuration already exists", http.StatusConflict)
+			return
+		}
 		http.Error(w, "profile was stored but could not be started", 503)
 		return
 	}

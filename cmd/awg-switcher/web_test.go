@@ -143,12 +143,13 @@ func TestRuntimePriorityOrderAndRestartPersistence(t *testing.T) {
 		cancel()
 		c.wg.Wait()
 	}()
-	for _, id := range []string{"first", "second", "third"} {
+	for i, id := range []string{"first", "second", "third"} {
+		config := []byte(strings.Replace(validWG, "172.16.0.2", fmt.Sprintf("172.16.0.%d", i+2), 1))
 		path := filepath.Join(profileDir, id+".conf")
-		if err := os.WriteFile(path, []byte(validWG), 0600); err != nil {
+		if err := os.WriteFile(path, config, 0600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := c.addRuntimeProfile(id, id, []byte(validWG), path); err != nil {
+		if _, err := c.addRuntimeProfile(id, id, config, path); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -282,7 +283,8 @@ func TestConcurrentRuntimeProfileAddRemoveAndSnapshot(t *testing.T) {
 		go func(i int) {
 			defer added.Done()
 			id := fmt.Sprintf("profile-%02d", i)
-			if _, err := c.addRuntimeProfile(id, id, []byte(validWG), filepath.Join(dir, id+".conf")); err != nil {
+			config := []byte(strings.Replace(validWG, "172.16.0.2", fmt.Sprintf("172.16.0.%d", i+2), 1))
+			if _, err := c.addRuntimeProfile(id, id, config, filepath.Join(dir, id+".conf")); err != nil {
 				t.Errorf("add: %v", err)
 			}
 		}(i)
@@ -388,11 +390,12 @@ func TestUploadWithRepeatedClientFilenameCreatesDistinctProfiles(t *testing.T) {
 			_ = os.Remove(p.path)
 		}
 	})
-	upload := func() int {
+	upload := func(address string) int {
 		var body bytes.Buffer
 		mw := multipart.NewWriter(&body)
 		part, _ := mw.CreateFormFile("file", "same-name.conf")
-		_, _ = part.Write([]byte(validWG))
+		config := strings.Replace(validWG, "172.16.0.2", address, 1)
+		_, _ = part.Write([]byte(config))
 		_ = mw.Close()
 		req := httptest.NewRequest(http.MethodPost, "/api/profiles", &body)
 		req.Header.Set("Content-Type", mw.FormDataContentType())
@@ -409,7 +412,7 @@ func TestUploadWithRepeatedClientFilenameCreatesDistinctProfiles(t *testing.T) {
 		}
 		return len(profile.ID)
 	}
-	if upload() == 0 || upload() == 0 {
+	if upload("172.16.0.2") == 0 || upload("172.16.0.3") == 0 {
 		t.Fatal("opaque IDs are empty")
 	}
 	if got := len(c.profilesSnapshot()); got != 2 {
@@ -527,6 +530,24 @@ func TestProfileUploadUsesOpaqueIDMasksSecretsAndRuntimeAddsWithoutRestart(t *te
 	}
 	if !strings.Contains(config.Body.String(), "[REDACTED]") {
 		t.Fatal("safe config view did not mask key")
+	}
+	var duplicateBody bytes.Buffer
+	duplicateWriter := multipart.NewWriter(&duplicateBody)
+	duplicatePart, _ := duplicateWriter.CreateFormFile("file", "same-config-different-name.conf")
+	_, _ = duplicatePart.Write([]byte(replacement))
+	_ = duplicateWriter.Close()
+	duplicateRequest := httptest.NewRequest(http.MethodPost, "/api/profiles", &duplicateBody)
+	duplicateRequest.Header.Set("Content-Type", duplicateWriter.FormDataContentType())
+	duplicateRequest.Header.Set("X-CSRF-Token", "csrf")
+	duplicateRequest.AddCookie(&http.Cookie{Name: "awg_session", Value: "session"})
+	duplicateResponse := httptest.NewRecorder()
+	web.handler().ServeHTTP(duplicateResponse, duplicateRequest)
+	if duplicateResponse.Code != http.StatusConflict || len(c.profilesSnapshot()) != 1 {
+		t.Fatalf("duplicate profile import status=%d profiles=%d body=%s", duplicateResponse.Code, len(c.profilesSnapshot()), duplicateResponse.Body.String())
+	}
+	profileFiles, err := filepath.Glob(filepath.Join(dir, "profiles", "*.conf"))
+	if err != nil || len(profileFiles) != 1 {
+		t.Fatalf("duplicate import left an orphaned managed file: files=%v err=%v", profileFiles, err)
 	}
 	response := httptest.NewRecorder()
 	web.handler().ServeHTTP(response, requestWithCookie(http.MethodGet, "/api/profiles", "session"))
