@@ -288,7 +288,14 @@ try {
   await page.locator('[data-template-id="template-github"]').click();
   await page.locator('#site-editor-list .site-editor-row').waitFor();
   if ((await page.locator('#site-count-label').textContent()) !== '1/20') throw new Error('selecting a template did not add it to the selected-site list');
+  if (await page.locator('[data-template-id="template-github"]').getAttribute('aria-pressed') !== 'true') throw new Error('selected website template did not show its selected state');
   await page.locator('#site-editor-list .site-editor-row').first().locator('.site-editor-summary').click();
+  const selectedSiteToggle = page.locator('#site-editor-list .site-active-line input');
+  await selectedSiteToggle.waitFor({ state: 'visible' });
+  if (!(await selectedSiteToggle.isChecked())) throw new Error('newly selected website is not enabled for checks');
+  await selectedSiteToggle.uncheck();
+  if (await selectedSiteToggle.isChecked()) throw new Error('website selection toggle did not turn off');
+  await selectedSiteToggle.check();
   await page.screenshot({ path: 'artifacts/ui-polish/site-settings-selected.png', fullPage: true });
   await page.locator('#site-editor-list .site-editor-row').first().locator('.site-editor-summary').click();
   await page.locator('#site-schedule-mode').selectOption('daily');
@@ -298,6 +305,7 @@ try {
   await page.locator('#site-schedule-paused').check();
   await page.locator('#site-settings-form [type="submit"]').click();
   await page.locator('#site-settings-dialog').waitFor({ state: 'hidden' });
+  await page.waitForFunction(async () => (await (await fetch('/api/website-monitor/settings')).json()).websites.some(site => site.name === 'GitHub API' && site.enabled));
   await page.locator('#wm-enabled').check();
   await page.waitForFunction(async () => (await (await fetch('/api/website-monitor/settings')).json()).enabled === true);
   console.log('SMOKE: monitor enabled; validating setup state');
