@@ -68,6 +68,10 @@ body:has(.automation-page:not(.hidden))> .shell>main>header{justify-content:flex
 .field>span,.settings-section-title h3{font-size:12px}
 .settings-count,.template-chip,.site-editor-advanced>summary,.settings-advanced>summary{font-size:12px}
 .pool-event time,.pool-event p,.pool-events-empty{font-size:11px}
+.site-template-help{margin:14px 0 7px}
+.site-template-help strong,.site-custom-help{font-size:11px;font-weight:650;color:var(--auto-text)}
+.site-template-help p{margin:3px 0 0;font-size:11px;line-height:1.45;color:var(--auto-muted)}
+.site-custom-help{margin-top:13px}
 .automation-pill.is-setup{color:#815718;background:#fff2d3}
 :root[data-theme="dark"] .automation-pill.is-setup{color:#f2cf7c;background:#3b301b}
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]) .automation-pill.is-setup{color:#f2cf7c;background:#3b301b}}
