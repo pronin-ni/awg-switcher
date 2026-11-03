@@ -87,9 +87,28 @@ try {
   await page.locator('.rail nav a[href="#dashboard"]').click();
   await page.locator('#dashboard').waitFor({ state: 'visible' });
 
+  let releaseAutomationLoad;
+  let signalAutomationLoad;
+  const automationLoadGate = new Promise(resolve => { releaseAutomationLoad = resolve; });
+  const automationStatusRequested = new Promise(resolve => { signalAutomationLoad = resolve; });
+  let holdAutomationStatus = true;
+  await page.route('**/api/status', async route => {
+    if (holdAutomationStatus) {
+      holdAutomationStatus = false;
+      signalAutomationLoad();
+      await automationLoadGate;
+    }
+    await route.continue();
+  });
   await page.locator('.rail nav a[href="#website-monitor"]').click();
-  if (!(await page.locator('#automation-refresh-state').textContent()).includes('Загрузка состояния')) throw new Error('automation did not show its initial loading state');
+  await automationStatusRequested;
+  if (!(await page.locator('#automation-refresh-state').textContent()).includes('Загрузка состояния')) {
+    releaseAutomationLoad();
+    throw new Error('automation did not show its initial loading state while the backend response was held');
+  }
+  releaseAutomationLoad();
   await page.waitForFunction(() => document.querySelector('#pool-ready-count')?.textContent !== '—');
+  await page.unroute('**/api/status');
   if (!(await page.locator('#pool-ready-count').textContent()).includes('Нет профилей')) throw new Error('an empty profile list must be distinct from zero working profiles');
   await page.locator('.rail nav a[href="#dashboard"]').click();
   await page.locator('#dashboard').waitFor({ state: 'visible' });
