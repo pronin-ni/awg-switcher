@@ -269,6 +269,15 @@ func (s *webServer) handler() http.Handler {
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 		_, _ = w.Write(b)
 	})
+	mux.HandleFunc("/automation-page.js", func(w http.ResponseWriter, r *http.Request) {
+		b, e := webFiles.ReadFile("web/automation-page.js")
+		if e != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		_, _ = w.Write(b)
+	})
 	mux.HandleFunc("/api/session", s.session)
 	mux.HandleFunc("/api/status", s.requireAuth(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.controller.snapshot()) }))
 	mux.HandleFunc("/api/events", s.requireAuth(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.controller.snapshot().Events) }))

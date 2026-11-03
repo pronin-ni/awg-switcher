@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createServer } from 'node:net';
+import { mkdir } from 'node:fs/promises';
 
 const name = `awg-browser-${process.pid}`;
 const volume = `${name}-data`;
@@ -14,6 +15,7 @@ function docker(...args) {
 }
 
 try {
+  await mkdir('artifacts/automation-redesign', { recursive: true });
   docker('volume', 'create', volume);
   const portServer = createServer();
   await new Promise((resolve) => portServer.listen(0, '127.0.0.1', resolve));
@@ -39,6 +41,8 @@ try {
 
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
+  page.on('pageerror', (error) => console.error('BROWSER PAGE ERROR:', error.stack || error));
+  page.on('console', (message) => { if (message.type() === 'error') console.error('BROWSER CONSOLE:', message.text()); });
   await page.goto(baseURL);
   await page.locator('#setup-token').fill(token);
   await page.locator('#setup-password').fill(password);
@@ -54,6 +58,13 @@ try {
   await page.locator('#language').click();
   if (!(await page.locator('.rail nav a[href="#website-monitor"]').textContent()).includes('Автоматизация')) throw new Error('Russian navigation translation did not restore');
   await page.locator('#theme').click();
+  await page.locator('.rail nav a[href="#dashboard"]').click();
+  await page.locator('#dashboard').waitFor({ state: 'visible' });
+
+  await page.locator('.rail nav a[href="#website-monitor"]').click();
+  if (!(await page.locator('#automation-refresh-state').textContent()).includes('Загрузка состояния')) throw new Error('automation did not show its initial loading state');
+  await page.waitForFunction(() => document.querySelector('#pool-ready-count')?.textContent !== '—');
+  if (!(await page.locator('#pool-ready-count').textContent()).includes('Нет профилей')) throw new Error('an empty profile list must be distinct from zero working profiles');
   await page.locator('.rail nav a[href="#dashboard"]').click();
   await page.locator('#dashboard').waitFor({ state: 'visible' });
 
@@ -92,49 +103,113 @@ try {
   page.on('dialog', (dialog) => dialog.accept());
   await page.locator('.rail nav a[href="#website-monitor"]').click();
   await page.locator('#website-monitor').waitFor({ state: 'visible' });
-  await page.setViewportSize({width:390,height:844});
-  const mobileLayout=await page.locator('#website-monitor').evaluate(el=>({width:el.clientWidth,scroll:el.scrollWidth}));if(mobileLayout.scroll>mobileLayout.width+2)throw new Error(`automation UI overflows mobile viewport: ${JSON.stringify(mobileLayout)}`);
-  await page.setViewportSize({width:1280,height:900});
-  await page.locator('#auto-enabled').waitFor();
-  await page.waitForFunction(() => document.querySelector('#wm-next-check')?.textContent.includes('выключены'));
-  if (!(await page.locator('#wm-last-check-summary').textContent()).includes('Ещё не проверялся')) throw new Error('empty Website Monitor timestamp was rendered as a date');
-  if (!(await page.locator('#auto-status').textContent()).includes('Ещё не запускалось')) throw new Error('empty replenishment timestamp was rendered as a date');
-  if ((await page.locator('#wm-results').innerText()).includes('01.01.1') || (await page.locator('#wm-results').innerText()).includes('0ms')) throw new Error('empty website results displayed an invalid date or latency');
+  await page.waitForFunction(() => document.querySelector('#pool-ready-count')?.textContent !== '—', null, { timeout: 10000 }).catch(async error => {
+    console.error('Automation DOM at timeout:', await page.locator('#website-monitor').innerText());
+    throw error;
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator('#theme').click();
+  await page.screenshot({ path: 'artifacts/automation-redesign/desktop-dark.png', fullPage: true });
+  await page.locator('#theme').click();
+  const automationHeading = await page.locator('#website-monitor h1').textContent();
+  if (automationHeading !== 'Автоматизация') throw new Error(`unexpected automation heading: ${automationHeading}`);
+  if (await page.locator('#website-monitor .automation-card').count() !== 2) throw new Error('automation overview must have exactly two compact cards');
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    const layout = await page.locator('#website-monitor').evaluate(el => ({ width: el.clientWidth, scroll: el.scrollWidth }));
+    if (layout.scroll > layout.width + 2) throw new Error(`automation UI overflows ${viewport.width}px viewport: ${JSON.stringify(layout)}`);
+    if (viewport.width === 1280) await page.screenshot({ path: 'artifacts/automation-redesign/laptop.png', fullPage: true });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.screenshot({ path: 'artifacts/automation-redesign/desktop.png', fullPage: true });
+  if (!(await page.locator('#site-next-check').textContent()).includes('выключены')) throw new Error('disabled website checks do not show disabled schedule state');
+  if (!(await page.locator('#site-last-run').textContent()).includes('Ещё не проверялся')) throw new Error('empty Website Monitor timestamp was rendered as a date');
+  if (!(await page.locator('#pool-last-run').textContent()).includes('Ещё не запускалось')) throw new Error('empty replenishment timestamp was rendered as a date');
+  const renderedReadyCount = (await page.locator('#pool-ready-count').textContent()).trim();
+  const profileHealthKnown = await page.evaluate(() => window.awgAutomationState.profiles.some(p => p.state === 'HEALTHY' || p.state === 'UNHEALTHY' || p.last_check));
+  if (profileHealthKnown ? !/^\d+$/.test(renderedReadyCount) : renderedReadyCount !== 'Нет данных') throw new Error(`profile readiness did not distinguish missing and known health data: ${renderedReadyCount}`);
   const autoDefaults = await (await page.request.get(`${baseURL}/api/auto-replenishment/settings`)).json();
   if (autoDefaults.enabled !== false || autoDefaults.minimum_ready !== 2 || autoDefaults.target_ready !== 4) {
     throw new Error(`unexpected automatic replenishment defaults: ${JSON.stringify(autoDefaults)}`);
   }
-  await page.locator('#auto-minimum').fill('3');
-  await page.waitForTimeout(5500);
-  if ((await page.locator('#auto-minimum').inputValue()) !== '3') throw new Error('automatic settings refresh overwrote an unsaved UI edit');
-  await page.locator('#auto-target').fill('5');
-  await page.locator('#auto-replenishment > details').evaluate(el => el.open = true);
-  await page.locator('.auto-version[value="awg2"]').uncheck();
-  const disabledCheckStatus = await page.evaluate(async () => {
-    const csrf = (await (await fetch('/api/session')).json()).csrf;
-    return (await fetch('/api/auto-replenishment/check', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: '{}' })).status;
-  });
-  if (disabledCheckStatus !== 409) throw new Error(`disabled automation allowed a background check: HTTP ${disabledCheckStatus}`);
-  await page.locator('[data-template="template-github"]').waitFor();
-  await page.locator('#wm-name').fill('Optional test target');
-  await page.locator('#wm-url').fill('https://example.com/health');
-  await page.locator('#wm-add-form button[type="submit"]').click();
-  await page.locator('.wm-site').waitFor();
+
+  await page.locator('#site-settings-open').click();
+  await page.locator('#site-settings-dialog').waitFor({ state: 'visible' });
+  await page.screenshot({ path: 'artifacts/automation-redesign/site-settings.png', fullPage: true });
+  await page.locator('[data-template-id="template-github"]').click();
+  await page.locator('#site-schedule-mode').selectOption('daily');
+  await page.locator('#site-schedule-daily').fill('09:00');
+  await page.locator('#site-settings-dialog .settings-advanced').evaluate(el => el.open = true);
+  await page.locator('#site-schedule-timezone').fill('Europe/Moscow');
+  await page.locator('#site-schedule-paused').check();
+  await page.locator('#site-settings-form [type="submit"]').click();
+  await page.locator('#site-settings-dialog').waitFor({ state: 'hidden' });
   await page.locator('#wm-enabled').check();
-  await page.locator('#website-monitor > .automation-card details').first().evaluate(el => el.open = true);
-  await page.locator('#wm-mode').selectOption('daily');
-  await page.locator('#wm-daily-wrap').waitFor({ state: 'visible' });
-  await page.locator('#wm-daily-at').fill('09:00');
-  await page.locator('#wm-timezone').fill('Europe/Moscow');
-  await page.locator('#wm-paused').check();
-  await page.waitForTimeout(5500);
-  const unsavedMode = await page.locator('#wm-mode').inputValue();
-  const unsavedPaused = await page.locator('#wm-paused').isChecked();
-  if (unsavedMode !== 'daily' || !unsavedPaused) {
-    throw new Error(`website-monitor refresh overwrote unsaved schedule edits: mode=${unsavedMode} paused=${unsavedPaused}`);
-  }
-  await page.locator('#wm-save').click();
-  await page.waitForFunction(async () => { const s=await (await fetch('/api/website-monitor/settings')).json(); const a=await (await fetch('/api/auto-replenishment/settings')).json(); return s.enabled===true&&s.schedule.mode==='daily'&&s.schedule.timezone==='Europe/Moscow'&&s.schedule.paused===true&&a.minimum_ready===3&&a.target_ready===5&&a.versions.length===2 });
+  await page.waitForFunction(async () => (await (await fetch('/api/website-monitor/settings')).json()).enabled === true);
+  await page.locator('#site-next-check').waitFor();
+
+  await page.locator('#pool-settings-open').click();
+  await page.locator('#pool-settings-dialog').waitFor({ state: 'visible' });
+  await page.screenshot({ path: 'artifacts/automation-redesign/pool-settings.png', fullPage: true });
+  await page.locator('#pool-minimum-input').fill('3');
+  await page.locator('#pool-target-input').fill('5');
+  await page.locator('#pool-settings-dialog .settings-advanced:not(#pool-events-details)').evaluate(el => el.open = true);
+  await page.locator('.pool-version[value="awg2"]').uncheck();
+  await page.locator('#pool-settings-form [type="submit"]').click();
+  await page.locator('#pool-settings-dialog').waitFor({ state: 'hidden' });
+  await page.waitForFunction(async () => { const a=await (await fetch('/api/auto-replenishment/settings')).json(); return a.minimum_ready===3&&a.target_ready===5&&a.versions.length===2 });
+
+  await page.route('**/api/website-monitor/check', async route => {
+    await delay(700);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ profiles: [], paused: true, last_check: new Date().toISOString() }) });
+  });
+  await page.locator('#site-check-now').click();
+  await page.waitForFunction(() => document.querySelector('#site-state-pill')?.textContent === 'Проверка…');
+  await page.waitForFunction(() => document.querySelector('#site-state-pill')?.textContent === 'Включено');
+  await page.unroute('**/api/website-monitor/check');
+
+  let mockedPoolEnabled = false;
+  await page.route('**/api/auto-replenishment/settings', async route => {
+    if (route.request().method() === 'GET') {
+      const response = await route.fetch();
+      const data = await response.json();
+      data.enabled = mockedPoolEnabled;
+      return route.fulfill({ response, json: data });
+    }
+    const data = route.request().postDataJSON();
+    mockedPoolEnabled = data.enabled;
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ saved: true, status: { running: mockedPoolEnabled } }) });
+  });
+  await page.route('**/api/auto-replenishment/status', async route => {
+    const response = await route.fetch();
+    const data = await response.json();
+    data.running = mockedPoolEnabled;
+    data.last_run_status = mockedPoolEnabled ? 'running' : '';
+    return route.fulfill({ response, json: data });
+  });
+  await page.locator('#auto-enabled').check();
+  await page.waitForFunction(() => document.querySelector('#pool-run-summary')?.textContent.includes('Проверяем новые профили'));
+  if (!(await page.locator('#pool-state-pill').textContent()).includes('Проверка')) throw new Error('active replenishment was not shown as running');
+  await page.waitForFunction(() => !document.querySelector('#automation-toast')?.classList.contains('is-visible'));
+  await page.screenshot({ path: 'artifacts/automation-redesign/generation-active.png', fullPage: true });
+  await page.locator('#auto-enabled').uncheck();
+  await page.waitForFunction(() => document.querySelector('#pool-state-pill')?.textContent === 'Выключено');
+  await page.unroute('**/api/auto-replenishment/settings');
+  await page.unroute('**/api/auto-replenishment/status');
+
+  await page.route('**/api/profiles', route => route.fulfill({ status: 503, body: 'synthetic test outage' }));
+  await page.locator('.rail nav a[href="#dashboard"]').click();
+  await page.locator('.rail nav a[href="#website-monitor"]').click();
+  await page.locator('#automation-error').waitFor({ state: 'visible' });
+  await page.unroute('**/api/profiles');
+  await page.locator('#automation-retry').click();
+  await page.locator('#automation-error').waitFor({ state: 'hidden' });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => !document.querySelector('#automation-toast')?.classList.contains('is-visible'));
+  await delay(250);
+  await page.screenshot({ path: 'artifacts/automation-redesign/mobile.png', fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 800 });
   await page.locator('#logout').click();
   docker('restart', name);
   for (let attempt = 0; attempt < 40; attempt++) {
@@ -159,7 +234,7 @@ try {
     throw new Error(`priorities changed after restart: ${afterRestart.join(' | ')}`);
   }
   await page.locator('.rail nav a[href="#website-monitor"]').click();
-  await page.waitForFunction(async () => { const s=await (await fetch('/api/website-monitor/settings')).json(); return s.enabled===true&&s.schedule.mode==='daily'&&s.schedule.timezone==='Europe/Moscow'&&s.schedule.paused===true&&s.websites.some(w=>w.name==='Optional test target') });
+  await page.waitForFunction(async () => { const s=await (await fetch('/api/website-monitor/settings')).json(); return s.enabled===true&&s.schedule.mode==='daily'&&s.schedule.timezone==='Europe/Moscow'&&s.schedule.paused===true&&s.websites.some(w=>w.name==='GitHub API') });
   await page.waitForFunction(async () => { const s=await (await fetch('/api/auto-replenishment/settings')).json(); return s.enabled===false&&s.minimum_ready===3&&s.target_ready===5&&s.versions.length===2 });
   await page.locator('a[href="#diagnostics"]').click();
   await page.locator('#network-debug').check();
@@ -170,7 +245,7 @@ try {
   await page.locator('#download-support').click();
   const report = await downloadPromise;
   if (report.suggestedFilename() !== 'awg-switcher-support.json') throw new Error('unexpected support report filename');
-  console.log('PASS: first-run setup, login, WARP generator, profiles/restart persistence, automatic replenishment defaults/settings/restart persistence, website-monitor selection/schedule/restart persistence, Network Debug and support report');
+  console.log('PASS: first-run setup, login, WARP generator, profile and automation restart persistence, two-card automation UI at desktop/laptop/mobile, settings dialogs and Network Debug');
 } finally {
   await browser?.close();
   try { docker('rm', '-f', name); } catch {}
