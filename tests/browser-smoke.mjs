@@ -140,9 +140,34 @@ try {
   const expectedReadiness = actualReadiness.total ? `${actualReadiness.ready} / ${actualReadiness.total}` : 'Нет профилей';
   if (renderedReadyCount !== expectedReadiness) throw new Error(`automation readiness differs from the backend/profile overview: UI=${renderedReadyCount}, backend=${expectedReadiness}`);
   const autoDefaults = await (await page.request.get(`${baseURL}/api/auto-replenishment/settings`)).json();
-  if (autoDefaults.enabled !== false || autoDefaults.minimum_ready !== 2 || autoDefaults.target_ready !== 4) {
+  if (autoDefaults.enabled !== false || autoDefaults.minimum_ready !== 2 || autoDefaults.target_ready !== 4 || autoDefaults.auto_delete_failed_profiles !== false || autoDefaults.auto_delete_after_hours !== 24) {
     throw new Error(`unexpected automatic replenishment defaults: ${JSON.stringify(autoDefaults)}`);
   }
+
+  await page.route('**/api/profiles', async route => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const response = await route.fetch();
+    const items = await response.json();
+    Object.assign(items[0], {
+      origin: 'auto_generated', auto_delete_active: true, auto_delete_after_hours: 24,
+      auto_unavailable_since: new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString(),
+      state: 'UNHEALTHY', healthy: false, connectivity_healthy: false, last_error: 'timeout', latency_ms: 8000,
+    });
+    return route.fulfill({ response, json: items });
+  });
+  await page.reload();
+  await page.locator('#dashboard').waitFor({ state: 'visible' });
+  await page.locator('.rail nav a[href="#profiles"]').click();
+  await page.locator('#profile-list .profile-row').first().waitFor();
+  if (!(await page.locator('#profile-list .profile-row').first().innerText()).includes('Удаление через')) {
+    throw new Error(`generated unavailable profile did not display its cleanup countdown: ${await page.locator('#profile-list .profile-row').first().innerText()}`);
+  }
+  if (!(await page.locator('#profile-list .profile-row').first().innerText()).includes('Таймаут (8 с)')) {
+    throw new Error('profile timeout was not rendered as a human-readable duration');
+  }
+  await page.screenshot({ path: 'artifacts/automation-redesign/auto-delete-candidate.png', fullPage: true });
+  await page.unroute('**/api/profiles');
+  await page.locator('.rail nav a[href="#website-monitor"]').click();
 
   await page.locator('#site-settings-open').click();
   await page.locator('#site-settings-dialog').waitFor({ state: 'visible' });
@@ -193,6 +218,13 @@ try {
 
   await page.locator('#pool-settings-open').click();
   await page.locator('#pool-settings-dialog').waitFor({ state: 'visible' });
+  await page.locator('#pool-settings-dialog .settings-advanced:not(#pool-events-details)').evaluate(el => el.open = true);
+  if (await page.locator('#pool-auto-delete').isChecked() || await page.locator('#pool-auto-delete-after').inputValue() !== '24') {
+    throw new Error('automatic cleanup must default to disabled with a 24-hour delay');
+  }
+  await page.locator('#pool-auto-delete').check();
+  await page.locator('#pool-auto-delete-after').selectOption('6');
+  if (!(await page.locator('#pool-auto-delete-after-field').isVisible())) throw new Error('cleanup delay is not shown when automatic deletion is enabled');
   await page.screenshot({ path: 'artifacts/automation-redesign/pool-settings.png', fullPage: true });
   await page.locator('#pool-minimum-input').fill('3');
   await page.locator('#pool-target-input').fill('5');
@@ -202,7 +234,7 @@ try {
   await page.locator('#pool-all-down').uncheck();
   await page.locator('#pool-settings-form [type="submit"]').click();
   await page.locator('#pool-settings-dialog').waitFor({ state: 'hidden' });
-  await page.waitForFunction(async () => { const a=await (await fetch('/api/auto-replenishment/settings')).json(); return a.minimum_ready===3&&a.target_ready===5&&a.versions.length===2 });
+  await page.waitForFunction(async () => { const a=await (await fetch('/api/auto-replenishment/settings')).json(); return a.minimum_ready===3&&a.target_ready===5&&a.versions.length===2&&a.auto_delete_failed_profiles===true&&a.auto_delete_after_hours===6 });
 
   await page.locator('#auto-enabled').check();
   await page.waitForFunction(async () => (await (await fetch('/api/auto-replenishment/settings')).json()).enabled === true);

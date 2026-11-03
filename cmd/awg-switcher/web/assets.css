@@ -87,3 +87,6 @@ body:has(.automation-page:not(.hidden))> .shell>main>header{justify-content:flex
  .rail.menu-open nav a{display:flex;align-items:center;min-height:42px;padding:0 12px;border-radius:8px;font-size:14px}
  .rail nav a::before{content:none!important}
 }
+.advanced-switches #pool-auto-delete-after-field{grid-column:1/-1;max-width:220px;margin-left:24px}
+.profile-auto-status{margin:7px 0;color:var(--amber);font-size:12px;font-weight:600}
+.row-actions button:disabled,.actions button:disabled{opacity:.45;cursor:not-allowed}
