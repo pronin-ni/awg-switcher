@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -40,6 +41,13 @@ func TestNormalizeDualStackBareAddresses(t *testing.T) {
 	}
 	if !strings.Contains(s, "S3 = 12") || !strings.Contains(s, "MTU = 1280") {
 		t.Fatal("AWG/WARP fields lost")
+	}
+	repeated, err := normalizeWG(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(b, repeated) {
+		t.Fatalf("normalization is not idempotent: first=%d bytes, second=%d bytes", len(b), len(repeated))
 	}
 }
 

@@ -100,7 +100,38 @@ try {
   if (!beforeRestart[0].includes('Приоритет 0') || !beforeRestart[1].includes('Приоритет 1')) {
     throw new Error(`unexpected priorities before restart: ${beforeRestart.join(' | ')}`);
   }
-  page.on('dialog', (dialog) => dialog.accept());
+  page.on('dialog', (dialog) => dialog.type() === 'prompt' ? dialog.accept('backup-renamed') : dialog.accept());
+  console.log('SMOKE: unhealthy-primary gating and profile rename');
+  const unavailablePrimary = page.locator('#profile-list .profile-row [data-action="active"]').first();
+  if (await unavailablePrimary.count() && !(await unavailablePrimary.isDisabled())) {
+    throw new Error('unhealthy imported profile remained selectable as primary');
+  }
+  await page.locator('#profile-list .profile-row').first().getByRole('button', { name: 'Переименовать' }).click();
+  await page.waitForFunction(() => document.querySelector('#profile-list .profile-row .profile-name')?.textContent === 'backup-renamed');
+  // Restore the original display name with an explicit prompt response.
+  page.removeAllListeners('dialog');
+  page.on('dialog', dialog => dialog.type() === 'prompt' ? dialog.accept('backup') : dialog.accept());
+  await page.locator('#profile-list .profile-row').first().getByRole('button', { name: 'Переименовать' }).click();
+  await page.waitForFunction(() => document.querySelector('#profile-list .profile-row .profile-name')?.textContent === 'backup');
+  await page.locator('#profile-list .profile-row').first().getByRole('button', { name: 'Отключить' }).click();
+  console.log('SMOKE: profile disable/enable');
+  await page.locator('#profile-list .profile-row').first().getByRole('button', { name: 'Включить' }).waitFor();
+  await page.locator('#profile-list .profile-row').first().getByRole('button', { name: 'Включить' }).click();
+  await page.locator('#profile-list .profile-row').first().getByRole('button', { name: 'Отключить' }).waitFor();
+
+  console.log('SMOKE: duplicate/malformed profile protection and deletion');
+  await page.locator('#modal-files').setInputFiles({ name: 'duplicate-primary.conf', mimeType: 'text/plain', buffer: Buffer.from(config) });
+  await page.waitForFunction(() => document.querySelector('#upload-result')?.textContent.includes('Не удалось загрузить'));
+  if (await page.locator('#profile-list .profile-row').count() !== 2) throw new Error('duplicate config created an extra profile');
+  await page.locator('#modal-files').setInputFiles({ name: 'malformed.conf', mimeType: 'text/plain', buffer: Buffer.from('not a VPN configuration') });
+  await page.waitForFunction(() => document.querySelector('#upload-result')?.textContent.includes('Не удалось загрузить'));
+  if (await page.locator('#profile-list .profile-row').count() !== 2) throw new Error('malformed config created an extra profile');
+  const disposableConfig = config.replace('172.16.0.2', '172.16.0.4');
+  await page.locator('#modal-files').setInputFiles({ name: 'temporary.conf', mimeType: 'text/plain', buffer: Buffer.from(disposableConfig) });
+  await page.locator('#profile-list .profile-row').nth(2).waitFor();
+  await page.locator('#profile-list .profile-row').last().getByRole('button', { name: 'Удалить' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('#profile-list .profile-row').length === 2);
+
   await page.locator('.rail nav a[href="#website-monitor"]').click();
   await page.locator('#website-monitor').waitFor({ state: 'visible' });
   await page.waitForFunction(() => document.querySelector('#pool-ready-count')?.textContent !== '—', null, { timeout: 10000 }).catch(async error => {
